@@ -464,12 +464,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-daily",
-        default="data/2025/cache/daily_2025.parquet",
+        default="data/cache/daily_2025.parquet",
         help="Output Parquet path (file if --single-file, or directory if --partitioned)",
     )
     parser.add_argument(
         "--out-weekly",
-        default="data/2025/cache/weekly.parquet",
+        default="data/cache/weekly.parquet",
         help="Output weekly Parquet (optional if --build-weekly)",
     )
     parser.add_argument(
@@ -503,7 +503,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-prefiltered",
-        default="data/2025/cache/daily_filtered_1_9.99.parquet",
+        default="data/cache/daily_filtered_1_9.99.parquet",
         help="Output path for pre-filtered dataset",
     )
     parser.add_argument(
@@ -513,7 +513,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-minute-features",
-        default="data/2025/cache/minute_features.parquet",
+        default="data/cache/minute_features.parquet",
         help="Output path for minute features Parquet",
     )
     parser.add_argument(

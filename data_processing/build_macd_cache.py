@@ -185,7 +185,7 @@ def write_parquet_dataset(df: pl.DataFrame, out_path: Path, partitioned: bool) -
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-root", default="data/2025/polygon_minute_aggs", help="Local raw minute files root")
-    ap.add_argument("--out-root", default="data/2025/cache/macd_day_features", help="Output cache root")
+    ap.add_argument("--out-root", default="data/cache/macd_day_features", help="Output cache root")
     ap.add_argument("--partitioned", action="store_true", help="Partition parquet by year/month")
     ap.add_argument("--write-bar-level", action="store_true", help="Also write bar-level MACD parquet (large)")
     args = ap.parse_args()

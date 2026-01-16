@@ -22,28 +22,28 @@ import subprocess
 import sys
 import threading
 import os
-from dotenv import load_dotenv
 
-# Set up logging
+# Set up logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env file
-# Get project root (parent of backend if we're in backend/)
-backend_dir = Path(__file__).parent
-if backend_dir.name == "backend":
-    project_root = backend_dir.parent
-else:
-    project_root = Path.cwd()
+# Try to import dotenv, fall back to manual parsing if not available
+try:
+    from dotenv import load_dotenv
+    HAS_DOTENV = True
+except ImportError:
+    HAS_DOTENV = False
+    logger.warning("python-dotenv not installed, will use manual .env parsing")
 
+# Load environment variables from .env file
+project_root = Path.cwd()
 env_path = project_root / ".env"
 if env_path.exists():
-    try:
+    if HAS_DOTENV:
         load_dotenv(env_path)
         logger.info(f"Loaded environment variables from {env_path}")
-    except ImportError:
-        # python-dotenv not installed, try manual parsing
-        logger.warning("python-dotenv not installed, attempting manual .env parsing")
+    else:
+        # Manual .env parsing
         try:
             with open(env_path, 'r') as f:
                 for line in f:
@@ -54,6 +54,10 @@ if env_path.exists():
             logger.info(f"Manually loaded environment variables from {env_path}")
         except Exception as e:
             logger.warning(f"Failed to load .env file: {e}")
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Stonks Data API")
 
@@ -137,7 +141,7 @@ def load_dataset(dataset: str) -> pl.DataFrame:
     if not parquet_path.exists():
         raise FileNotFoundError(
             f"Dataset file not found: {parquet_path}. "
-            f"Please run: python data_processing/process_all_data.py to generate the cache files."
+            f"Please run: python process_all_data.py to generate the cache files."
         )
     
     try:
@@ -830,13 +834,9 @@ def get_last_trading_day() -> datetime:
     return datetime.combine(last_trading_day, datetime.min.time())
 
 
-def get_latest_data_date(force_reload: bool = False) -> Optional[datetime]:
+def get_latest_data_date() -> Optional[datetime]:
     """Get the latest date available in the datasets."""
     try:
-        # Force reload if requested (clear cache first)
-        if force_reload and "daily" in _data_cache:
-            del _data_cache["daily"]
-        
         # Try to load the daily dataset to get the latest date
         df = load_dataset("daily")
         if "date" not in df.columns:
@@ -863,10 +863,10 @@ def get_latest_data_date(force_reload: bool = False) -> Optional[datetime]:
 
 
 @app.get("/api/data-freshness")
-def check_data_freshness(force_reload: bool = Query(False, description="Force reload dataset to check latest data")):
+def check_data_freshness():
     """Check if we have data up to the prior day's market close."""
     try:
-        latest_data_date = get_latest_data_date(force_reload=force_reload)
+        latest_data_date = get_latest_data_date()
         last_trading_day = get_last_trading_day()
         
         if latest_data_date is None:
@@ -917,13 +917,8 @@ def run_data_update():
         }
     
     try:
-        # Get the project root directory (parent of backend if we're in backend/)
-        # api_server.py is in backend/, so go up one level to get project root
-        backend_dir = Path(__file__).parent
-        if backend_dir.name == "backend":
-            project_root = backend_dir.parent
-        else:
-            project_root = Path.cwd()
+        # Get the project root directory
+        project_root = Path.cwd()
         
         # Try data_processing directory first, then root
         script_paths = [
@@ -1037,7 +1032,6 @@ def run_data_update():
             # Clear cache so fresh data is loaded
             _data_cache.clear()
             logger.info("Data update completed successfully")
-            logger.info("Cache cleared - next freshness check will reload data")
         else:
             error_msg = "\n".join(output_lines[-10:])  # Last 10 lines
             with _update_lock:

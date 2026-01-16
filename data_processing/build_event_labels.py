@@ -221,7 +221,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-root",
-        default="data/2025/cache/training",
+        default="data/cache/training",
         help="Output directory for event parquet files",
     )
     parser.add_argument(

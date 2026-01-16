@@ -166,27 +166,27 @@ def main() -> None:
     )
     parser.add_argument(
         "--events-glob",
-        default="data/2025/cache/training/events_*.parquet",
+        default="data/cache/training/events_*.parquet",
         help="Glob pattern for event parquet files",
     )
     parser.add_argument(
         "--macd-glob",
-        default="data/2025/cache/macd_day_features_inc/mode=all/*.parquet",
+        default="data/cache/macd_day_features_inc/mode=all/*.parquet",
         help="Glob pattern for MACD day features",
     )
     parser.add_argument(
         "--vol-path",
-        default="data/2025/cache/minute_features.parquet",
+        default="data/cache/minute_features.parquet",
         help="Path to volatility features parquet",
     )
     parser.add_argument(
         "--daily-path",
-        default="data/2025/cache/daily_filtered_1_9.99.parquet",
+        default="data/cache/daily_filtered_1_9.99.parquet",
         help="Path to daily cache (for price filtering)",
     )
     parser.add_argument(
         "--output",
-        default="data/2025/cache/training/ml_dataset.parquet",
+        default="data/cache/training/ml_dataset.parquet",
         help="Output path for training dataset",
     )
     parser.add_argument(

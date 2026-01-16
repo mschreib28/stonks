@@ -99,7 +99,7 @@ def main():
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="data/2025/cache",
+        default="data/cache",
         help="Directory containing parquet cache files",
     )
     parser.add_argument(

@@ -165,7 +165,7 @@ def write_day_parquet(df: pl.DataFrame, out_dir: Path, date_str: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input-root", default="data/2025/polygon_minute_aggs")
-    ap.add_argument("--out-root", default="data/2025/cache/macd_day_features_inc")
+    ap.add_argument("--out-root", default="data/cache/macd_day_features_inc")
     ap.add_argument("--mode", choices=["all", "rth"], default="all",
                    help="Compute features using all sessions or RTH-only (ET).")
     args = ap.parse_args()

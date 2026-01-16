@@ -67,12 +67,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--input",
-        default="data/2025/cache/daily_2025.parquet",
+        default="data/cache/daily_2025.parquet",
         help="Path to daily cache parquet file",
     )
     parser.add_argument(
         "--output",
-        default="data/2025/cache/range_expansion_labels.parquet",
+        default="data/cache/range_expansion_labels.parquet",
         help="Output path for range expansion labels",
     )
     parser.add_argument(
