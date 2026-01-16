@@ -85,3 +85,16 @@ export interface ScoringResponse {
   total: number;
 }
 
+export interface ScoringPreset {
+  id: string;
+  name: string;
+  description: string;
+  criteria: ScoringCriteria[];
+  monthsBack: number;
+  minDays: number;
+  minAvgVolume: number;
+  minPrice?: number;
+  maxPrice?: number;
+  createdAt: string;
+}
+
