@@ -31,9 +31,101 @@ function App() {
   const [scoring, setScoring] = useState<boolean>(false);
   const [useRankedResults, setUseRankedResults] = useState<boolean>(false);
 
+  // Load state from URL on mount
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    
+    // Restore dataset
+    const urlDataset = params.get('dataset');
+    if (urlDataset) {
+      setSelectedDataset(urlDataset);
+    }
+    
+    // Restore ticker
+    const urlTicker = params.get('ticker');
+    if (urlTicker) {
+      setSelectedTicker(urlTicker);
+    }
+    
+    // Restore filters
+    const urlFilters = params.get('filters');
+    if (urlFilters) {
+      try {
+        const parsedFilters = JSON.parse(decodeURIComponent(urlFilters));
+        setFilters(parsedFilters);
+      } catch (e) {
+        console.error('Failed to parse filters from URL:', e);
+      }
+    }
+    
+    // Restore active filters
+    const urlActiveFilters = params.get('activeFilters');
+    if (urlActiveFilters) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(urlActiveFilters));
+        setActiveFilters(parsed);
+      } catch (e) {
+        console.error('Failed to parse activeFilters from URL:', e);
+      }
+    }
+    
+    // Restore page
+    const urlPage = params.get('page');
+    if (urlPage) {
+      setPage(parseInt(urlPage, 10));
+    }
+    
+    // Restore page size
+    const urlPageSize = params.get('pageSize');
+    if (urlPageSize) {
+      setPageSize(parseInt(urlPageSize, 10));
+    }
+    
+    // Restore sort
+    const urlSortBy = params.get('sortBy');
+    if (urlSortBy) {
+      setSortBy(urlSortBy);
+    }
+    const urlSortDesc = params.get('sortDesc');
+    if (urlSortDesc) {
+      setSortDesc(urlSortDesc === 'true');
+    }
+    
     loadDatasets();
   }, []);
+
+  // Update URL when state changes
+  useEffect(() => {
+    const params = new URLSearchParams();
+    
+    if (selectedDataset) {
+      params.set('dataset', selectedDataset);
+    }
+    if (selectedTicker) {
+      params.set('ticker', selectedTicker);
+    }
+    if (Object.keys(filters).length > 0) {
+      params.set('filters', encodeURIComponent(JSON.stringify(filters)));
+    }
+    if (activeFilters.length > 0) {
+      params.set('activeFilters', encodeURIComponent(JSON.stringify(activeFilters)));
+    }
+    if (page > 0) {
+      params.set('page', page.toString());
+    }
+    if (pageSize !== 100) {
+      params.set('pageSize', pageSize.toString());
+    }
+    if (sortBy) {
+      params.set('sortBy', sortBy);
+    }
+    if (sortDesc) {
+      params.set('sortDesc', sortDesc.toString());
+    }
+    
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+  }, [selectedDataset, selectedTicker, filters, activeFilters, page, pageSize, sortBy, sortDesc]);
 
   useEffect(() => {
     if (selectedDataset) {
