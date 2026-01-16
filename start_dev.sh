@@ -28,7 +28,7 @@ fi
 
 # Start API server in background
 echo "Starting API server on port 8000..."
-uv run python api_server.py > api_server.log 2>&1 &
+uv run python backend/api_server.py > api_server.log 2>&1 &
 API_PID=$!
 
 # Wait for API server to be ready

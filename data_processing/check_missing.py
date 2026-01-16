@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-EXPECTED_FILE = Path("files_list.txt")          # <-- your S3 listing text file
+EXPECTED_FILE = Path("data/files_list.txt")          # <-- your S3 listing text file
 LOCAL_ROOT    = Path("polygon_day_aggs_2025") # <-- your download folder
 
 def parse_expected_paths(text: str) -> set[str]:
