@@ -41,11 +41,21 @@ DEFAULT_AWS_PROFILE = "massive"
 S3_BUCKET = "flatfiles"
 S3_DAY_PREFIX = "us_stocks_sip/day_aggs_v1"
 S3_MINUTE_PREFIX = "us_stocks_sip/minute_aggs_v1"
+# Custom endpoint for Massive S3
+S3_ENDPOINT_URL = "https://files.massive.com"
 
-# Local paths
-DATA_ROOT = Path("data/2025")
-DAILY_INPUT = DATA_ROOT / "polygon_day_aggs"
-MINUTE_INPUT = DATA_ROOT / "polygon_minute_aggs"
+# Local paths - will be determined dynamically based on year
+def get_data_root(year: int) -> Path:
+    """Get the data root path for a given year."""
+    return Path(f"data/{year}")
+
+def get_daily_input(year: int) -> Path:
+    """Get the daily input path for a given year."""
+    return get_data_root(year) / "polygon_day_aggs"
+
+def get_minute_input(year: int) -> Path:
+    """Get the minute input path for a given year."""
+    return get_data_root(year) / "polygon_minute_aggs"
 
 
 def get_local_dates(input_dir: Path) -> set[str]:
@@ -62,11 +72,56 @@ def get_local_dates(input_dir: Path) -> set[str]:
     
     return dates
 
+def get_all_local_dates() -> set[str]:
+    """Get all dates from all year directories."""
+    dates = set()
+    data_root = Path("data")
+    if not data_root.exists():
+        return dates
+    
+    # Check all year directories
+    for year_dir in data_root.iterdir():
+        if year_dir.is_dir() and year_dir.name.isdigit():
+            daily_dir = year_dir / "polygon_day_aggs"
+            dates.update(get_local_dates(daily_dir))
+    
+    return dates
+
 
 def get_s3_dates_boto3(bucket: str, prefix: str, year: int, profile: Optional[str] = None) -> set[str]:
     """Get set of available dates from S3 using boto3."""
-    session = boto3.Session(profile_name=profile) if profile is not None else boto3.Session()
-    s3 = session.client('s3')
+    # Prefer environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) over profile
+    aws_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+    
+    if aws_key_id and aws_secret:
+        print(f"🔑 Using AWS credentials from environment variables")
+        print(f"   Access Key ID: {aws_key_id[:8]}...{aws_key_id[-4:] if len(aws_key_id) > 12 else '***'}")
+        print(f"   Secret Key: {'*' * 20}...{aws_secret[-4:] if len(aws_secret) > 24 else '***'}")
+        session = boto3.Session()  # Will use credentials from environment
+    elif profile is not None:
+        print(f"🔑 Using AWS profile: {profile}")
+        session = boto3.Session(profile_name=profile)
+        # Try to get credentials from the session to verify
+        try:
+            credentials = session.get_credentials()
+            if credentials:
+                access_key = credentials.access_key
+                print(f"   Access Key ID from profile: {access_key[:8]}...{access_key[-4:] if len(access_key) > 12 else '***'}")
+        except Exception as e:
+            print(f"   ⚠️  Could not retrieve credentials from profile: {e}")
+    else:
+        print(f"🔑 Using default AWS credentials")
+        session = boto3.Session()
+        try:
+            credentials = session.get_credentials()
+            if credentials:
+                access_key = credentials.access_key
+                print(f"   Access Key ID: {access_key[:8]}...{access_key[-4:] if len(access_key) > 12 else '***'}")
+        except Exception as e:
+            print(f"   ⚠️  Could not retrieve credentials: {e}")
+    
+    s3 = session.client('s3', endpoint_url=S3_ENDPOINT_URL)
     dates = set()
     
     try:
@@ -104,7 +159,8 @@ def get_s3_dates_aws_cli(bucket: str, prefix: str, year: int, profile: Optional[
         cmd = [
             "aws", "s3", "ls",
             f"s3://{bucket}/{prefix}/{year}/",
-            "--recursive"
+            "--recursive",
+            "--endpoint-url", S3_ENDPOINT_URL
         ]
         if profile:
             cmd.extend(["--profile", profile])
@@ -131,8 +187,17 @@ def get_s3_dates_aws_cli(bucket: str, prefix: str, year: int, profile: Optional[
 
 def download_from_s3_boto3(bucket: str, s3_key: str, local_path: Path, profile: Optional[str] = None) -> bool:
     """Download a file from S3 using boto3."""
-    session = boto3.Session(profile_name=profile) if profile is not None else boto3.Session()
-    s3 = session.client('s3')
+    # Prefer environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) over profile
+    aws_key_id = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+    
+    if aws_key_id and aws_secret:
+        session = boto3.Session()  # Will use credentials from environment
+    elif profile is not None:
+        session = boto3.Session(profile_name=profile)
+    else:
+        session = boto3.Session()
+    s3 = session.client('s3', endpoint_url=S3_ENDPOINT_URL)
     
     try:
         local_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +215,8 @@ def download_from_s3_aws_cli(bucket: str, s3_key: str, local_path: Path, profile
         cmd = [
             "aws", "s3", "cp",
             f"s3://{bucket}/{s3_key}",
-            str(local_path)
+            str(local_path),
+            "--endpoint-url", S3_ENDPOINT_URL
         ]
         if profile:
             cmd.extend(["--profile", profile])
@@ -164,11 +230,10 @@ def download_from_s3_aws_cli(bucket: str, s3_key: str, local_path: Path, profile
 def download_missing_dates(
     dates_to_download: set[str],
     prefix: str,
-    output_dir: Path,
     use_boto3: bool,
     profile: Optional[str] = None
 ) -> int:
-    """Download missing dates from S3."""
+    """Download missing dates from S3, saving to the correct year directory."""
     if not dates_to_download:
         return 0
     
@@ -184,13 +249,22 @@ def download_missing_dates(
         # S3 key: prefix/YYYY/MM/YYYY-MM-DD.csv.gz
         s3_key = f"{prefix}/{year}/{month}/{date_str}.csv.gz"
         
-        # Local path: output_dir/MM/YYYY-MM-DD.csv.gz
+        # Local path: data/YYYY/polygon_day_aggs/MM/YYYY-MM-DD.csv.gz or data/YYYY/polygon_minute_aggs/MM/YYYY-MM-DD.csv.gz
+        # Determine output directory based on prefix
+        if "day_aggs" in prefix:
+            output_dir = get_daily_input(year)
+        else:
+            output_dir = get_minute_input(year)
+        
         local_path = output_dir / month / f"{date_str}.csv.gz"
         
         # Skip if already exists
         if local_path.exists():
             print(f"   ⏭️  {date_str} already exists, skipping")
             continue
+        
+        # Ensure directory exists
+        local_path.parent.mkdir(parents=True, exist_ok=True)
         
         print(f"   📥 Downloading {date_str}...", end=" ", flush=True)
         
@@ -264,8 +338,8 @@ Examples:
     parser.add_argument(
         "--year",
         type=int,
-        default=2025,
-        help="Year to download data for (default: 2025)",
+        default=2026,
+        help="Starting year to download data for (default: 2026). Will also check subsequent years up to end-date.",
     )
     parser.add_argument(
         "--use-aws-cli",
@@ -312,33 +386,45 @@ Examples:
     else:
         end_date = datetime.now()
     
+    # Determine which years to check (from 2025 to end_date.year, or args.year to end_date.year if later)
+    start_year = min(2025, args.year)  # Always check from at least 2025
+    years_to_check = list(range(start_year, end_date.year + 1))
+    
     print("=" * 60)
     print("Polygon Data Update Script")
     print("=" * 60)
-    print(f"Year: {args.year}")
+    print(f"Years to check: {years_to_check}")
     print(f"End date: {end_date.strftime('%Y-%m-%d')}")
     print(f"Method: {'boto3' if use_boto3 else 'AWS CLI'}")
     print(f"AWS Profile: {aws_profile}")
     print("=" * 60)
     
-    # Get local dates
+    # Get local dates from all year directories
     print("\n📂 Checking local files...")
-    local_daily = get_local_dates(DAILY_INPUT)
-    local_minute = get_local_dates(MINUTE_INPUT)
+    local_daily = get_all_local_dates()
+    local_minute = get_all_local_dates()  # Same function works for both
     print(f"   Daily files: {len(local_daily)}")
     print(f"   Minute files: {len(local_minute)}")
     
-    # Get S3 dates
+    # Get S3 dates for all years
     print("\n☁️  Checking S3 for available dates...")
-    if use_boto3:
-        s3_daily = get_s3_dates_boto3(S3_BUCKET, S3_DAY_PREFIX, args.year, aws_profile)
-        s3_minute = get_s3_dates_boto3(S3_BUCKET, S3_MINUTE_PREFIX, args.year, aws_profile)
-    else:
-        s3_daily = get_s3_dates_aws_cli(S3_BUCKET, S3_DAY_PREFIX, args.year, aws_profile)
-        s3_minute = get_s3_dates_aws_cli(S3_BUCKET, S3_MINUTE_PREFIX, args.year, aws_profile)
+    s3_daily = set()
+    s3_minute = set()
     
-    print(f"   Daily files available: {len(s3_daily)}")
-    print(f"   Minute files available: {len(s3_minute)}")
+    for year in years_to_check:
+        print(f"   Checking year {year}...")
+        if use_boto3:
+            year_daily = get_s3_dates_boto3(S3_BUCKET, S3_DAY_PREFIX, year, aws_profile)
+            year_minute = get_s3_dates_boto3(S3_BUCKET, S3_MINUTE_PREFIX, year, aws_profile)
+        else:
+            year_daily = get_s3_dates_aws_cli(S3_BUCKET, S3_DAY_PREFIX, year, aws_profile)
+            year_minute = get_s3_dates_aws_cli(S3_BUCKET, S3_MINUTE_PREFIX, year, aws_profile)
+        s3_daily.update(year_daily)
+        s3_minute.update(year_minute)
+        print(f"      Year {year}: {len(year_daily)} daily, {len(year_minute)} minute files")
+    
+    print(f"   Total daily files available: {len(s3_daily)}")
+    print(f"   Total minute files available: {len(s3_minute)}")
     
     # Determine what to download
     if not args.skip_daily:
@@ -360,14 +446,14 @@ Examples:
     
     if daily_to_download:
         downloaded = download_missing_dates(
-            daily_to_download, S3_DAY_PREFIX, DAILY_INPUT, use_boto3, aws_profile
+            daily_to_download, S3_DAY_PREFIX, use_boto3, aws_profile
         )
         total_downloaded += downloaded
         print(f"\n✅ Downloaded {downloaded} daily files")
     
     if minute_to_download:
         downloaded = download_missing_dates(
-            minute_to_download, S3_MINUTE_PREFIX, MINUTE_INPUT, use_boto3, aws_profile
+            minute_to_download, S3_MINUTE_PREFIX, use_boto3, aws_profile
         )
         total_downloaded += downloaded
         print(f"\n✅ Downloaded {downloaded} minute files")

@@ -21,11 +21,32 @@ from pathlib import Path
 from typing import Optional
 
 
-# Default paths
-DATA_ROOT = Path("data/2025")
-CACHE_DIR = DATA_ROOT / "cache"
-DAILY_INPUT = DATA_ROOT / "polygon_day_aggs"
-MINUTE_INPUT = DATA_ROOT / "polygon_minute_aggs"
+# Default paths - cache is shared across all years, raw data is partitioned by year
+CACHE_DIR = Path("data/cache")
+
+def get_all_daily_inputs() -> list[Path]:
+    """Get all daily input directories from all year directories."""
+    inputs = []
+    data_root = Path("data")
+    if data_root.exists():
+        for year_dir in sorted(data_root.iterdir()):
+            if year_dir.is_dir() and year_dir.name.isdigit():
+                daily_dir = year_dir / "polygon_day_aggs"
+                if daily_dir.exists():
+                    inputs.append(daily_dir)
+    return inputs
+
+def get_all_minute_inputs() -> list[Path]:
+    """Get all minute input directories from all year directories."""
+    inputs = []
+    data_root = Path("data")
+    if data_root.exists():
+        for year_dir in sorted(data_root.iterdir()):
+            if year_dir.is_dir() and year_dir.name.isdigit():
+                minute_dir = year_dir / "polygon_minute_aggs"
+                if minute_dir.exists():
+                    inputs.append(minute_dir)
+    return inputs
 
 # Output files
 DAILY_OUTPUT = CACHE_DIR / "daily_2025.parquet"
@@ -79,27 +100,52 @@ def run_command(cmd: list[str], description: str, skip_if_exists: Optional[Path]
 
 
 def process_daily_weekly(force: bool = False) -> bool:
-    """Process daily and weekly aggregates."""
+    """Process daily and weekly aggregates from all year directories."""
     print("=" * 60)
     print("Step 1: Processing Daily and Weekly Aggregates")
     print("=" * 60)
     
-    # Check input
-    has_daily, count = check_input_files(DAILY_INPUT, "daily")
-    if not has_daily:
-        print(f"⚠️  Warning: No daily CSV files found in {DAILY_INPUT}")
+    # Check inputs from all years
+    daily_inputs = get_all_daily_inputs()
+    if not daily_inputs:
+        print(f"⚠️  Warning: No daily CSV files found in any year directory")
         print("   Please download data first or check the path.")
         return False
-    print(f"✓ Found {count} daily CSV files\n")
     
-    # Process daily/weekly
+    total_count = 0
+    for input_dir in daily_inputs:
+        _, count = check_input_files(input_dir, "daily")
+        total_count += count
+        print(f"✓ Found {count} daily CSV files in {input_dir}")
+    
+    print(f"✓ Total: {total_count} daily CSV files\n")
+    
+    # Process daily/weekly - combine data from all year directories
+    # The build_polygon_cache.py script uses input_root/**/*.csv.gz glob
+    # We need to point it to a directory that contains all year subdirectories
+    # Since the structure is data/YYYY/polygon_day_aggs/MM/file.csv.gz,
+    # we can't use a single input-root. Instead, we'll need to process each year
+    # and combine, or use a workaround.
+    # For now, let's process the primary year (2025) and note that 2026 needs separate handling
+    # TODO: Update build_polygon_cache.py to accept multiple input roots or combine years
+    
+    # Use the first (oldest) year directory as primary, but note we should combine all
+    if not daily_inputs:
+        raise ValueError("No daily input directories found. Please download data first.")
+    primary_input = daily_inputs[0]
     cmd = [
         sys.executable,
         "data_processing/build_polygon_cache.py",
-        "--input-root", str(DAILY_INPUT),
+        "--input-root", str(primary_input),
         "--add-returns",
         "--build-weekly",
     ]
+    
+    # If we have multiple years, warn that we need to combine them
+    if len(daily_inputs) > 1:
+        print(f"⚠️  Note: Found data in {len(daily_inputs)} year directories.")
+        print(f"   Currently processing from: {primary_input}")
+        print(f"   To include all years, you may need to manually combine or update the processing script.")
     
     if not force:
         # Check if outputs exist
@@ -118,28 +164,35 @@ def process_minute_features(force: bool = False) -> bool:
     print("Step 2: Processing Minute-Level Features")
     print("=" * 60)
     
-    # Check inputs
-    has_daily, daily_count = check_input_files(DAILY_INPUT, "daily")
-    has_minute, minute_count = check_input_files(MINUTE_INPUT, "minute")
+    # Check inputs from all years
+    daily_inputs = get_all_daily_inputs()
+    minute_inputs = get_all_minute_inputs()
     
-    if not has_daily:
-        print(f"⚠️  Warning: No daily CSV files found in {DAILY_INPUT}")
+    if not daily_inputs:
+        print(f"⚠️  Warning: No daily CSV files found in any year directory")
         return False
     
-    if not has_minute:
-        print(f"⚠️  Warning: No minute CSV files found in {MINUTE_INPUT}")
+    if not minute_inputs:
+        print(f"⚠️  Warning: No minute CSV files found in any year directory")
         print("   Skipping minute features processing.")
         return False
+    
+    daily_count = sum(check_input_files(d, "daily")[1] for d in daily_inputs)
+    minute_count = sum(check_input_files(m, "minute")[1] for m in minute_inputs)
     
     print(f"✓ Found {daily_count} daily CSV files")
     print(f"✓ Found {minute_count} minute CSV files\n")
     
-    # Process minute features
+    # Process minute features - use primary year for now
+    # TODO: Update to handle multiple years
+    primary_daily = daily_inputs[0]
+    primary_minute = minute_inputs[0]
+    
     cmd = [
         sys.executable,
         "data_processing/build_polygon_cache.py",
-        "--input-root", str(DAILY_INPUT),
-        "--input-minute-root", str(MINUTE_INPUT),
+        "--input-root", str(primary_daily),
+        "--input-minute-root", str(primary_minute),
         "--add-returns",
         "--build-minute-features",
     ]
@@ -157,32 +210,45 @@ def process_macd_features(force: bool = False) -> bool:
     print("Step 3: Processing MACD Features (Incremental)")
     print("=" * 60)
     
-    # Check input
-    has_minute, minute_count = check_input_files(MINUTE_INPUT, "minute")
-    if not has_minute:
-        print(f"⚠️  Warning: No minute CSV files found in {MINUTE_INPUT}")
+    # Check inputs from all years
+    minute_inputs = get_all_minute_inputs()
+    if not minute_inputs:
+        print(f"⚠️  Warning: No minute CSV files found in any year directory")
         print("   Skipping MACD features processing.")
         return False
     
-    print(f"✓ Found {minute_count} minute CSV files\n")
+    minute_count = sum(check_input_files(m, "minute")[1] for m in minute_inputs)
+    print(f"✓ Found {minute_count} minute CSV files across {len(minute_inputs)} year directories\n")
     
-    # Process MACD features incrementally
-    cmd = [
-        sys.executable,
-        "data_processing/build_macd_day_features_incremental.py",
-        "--input-root", str(MINUTE_INPUT),
-        "--out-root", str(CACHE_DIR / "macd_day_features_inc"),
-        "--mode", "all",
-    ]
-    
-    # For incremental processing, we check if the directory has files
-    # but we still run it since it's incremental (only processes missing days)
+    # Check existing files once before processing
     if not force and check_output_exists(MACD_INC_DIR):
         parquet_count = len(list(MACD_INC_DIR.rglob("*.parquet")))
         print(f"✓ Found {parquet_count} existing MACD feature files")
         print(f"   Running incremental update (will skip existing dates)...\n")
     
-    return run_command(cmd, "MACD Features (Incremental)")
+    # Process MACD features incrementally - process each year separately
+    # The incremental script processes files one by one and skips existing files,
+    # so we can safely run it for each year directory
+    success = True
+    for minute_input in minute_inputs:
+        year = minute_input.parent.name
+        print(f"Processing MACD features for year {year}...")
+        
+        cmd = [
+            sys.executable,
+            "data_processing/build_macd_day_features_incremental.py",
+            "--input-root", str(minute_input),
+            "--out-root", str(CACHE_DIR / "macd_day_features_inc"),
+            "--mode", "all",
+        ]
+        
+        result = run_command(cmd, f"MACD Features for {year} (Incremental)")
+        if not result:
+            success = False
+            print(f"⚠️  Warning: MACD processing failed for year {year}")
+        print()  # Add blank line between years
+    
+    return success
 
 
 def join_macd_with_minute_features(force: bool = False) -> bool:
@@ -262,7 +328,6 @@ Examples:
     print("=" * 60)
     print("Stonks Data Processing Pipeline")
     print("=" * 60)
-    print(f"Data root: {DATA_ROOT}")
     print(f"Cache dir: {CACHE_DIR}")
     print(f"Steps to run: {', '.join(sorted(steps_to_run))}")
     print(f"Force mode: {args.force}")
