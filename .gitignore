@@ -13,7 +13,7 @@ env/
 ENV/
 
 # Data files (large datasets - exclude from git but allow Cursor access)
-data/
+#data/
 
 # Environment variables and secrets
 .env
