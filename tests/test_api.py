@@ -29,11 +29,11 @@ def test_cache_dir():
             for f in parquet_files:
                 print(f"    - {f.name}")
         else:
-            print("  ⚠ No Parquet files found. Run: python process_all_data.py")
+            print("  ⚠ No Parquet files found. Run: python data_processing/process_all_data.py")
         return True
     else:
         print(f"⚠ Cache directory does not exist: {cache_dir}")
-        print("  Run: python process_all_data.py to generate cache files")
+        print("  Run: python data_processing/process_all_data.py to generate cache files")
         return False
 
 if __name__ == "__main__":

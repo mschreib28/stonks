@@ -97,7 +97,7 @@ def load_dataset(dataset: str) -> pl.DataFrame:
     if not parquet_path.exists():
         raise FileNotFoundError(
             f"Dataset file not found: {parquet_path}. "
-            f"Please run: python process_all_data.py to generate the cache files."
+            f"Please run: python data_processing/process_all_data.py to generate the cache files."
         )
     
     try:

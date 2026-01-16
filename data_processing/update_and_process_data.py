@@ -381,7 +381,7 @@ Examples:
         print("Processing Data")
         print("=" * 60)
         
-        cmd = [sys.executable, "process_all_data.py"]
+        cmd = [sys.executable, "data_processing/process_all_data.py"]
         if args.force_process:
             cmd.append("--force")
         
@@ -394,7 +394,7 @@ Examples:
             sys.exit(1)
     else:
         print("\n⏭️  Skipping data processing (--no-process flag set)")
-        print("   Run manually with: python process_all_data.py")
+        print("   Run manually with: python data_processing/process_all_data.py")
 
 
 if __name__ == "__main__":
