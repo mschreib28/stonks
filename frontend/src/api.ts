@@ -40,3 +40,32 @@ export const scoreTickers = async (request: ScoringRequest): Promise<ScoringResp
   return response.data;
 };
 
+export interface DataFreshnessResponse {
+  is_fresh: boolean;
+  latest_data_date: string | null;
+  expected_date: string;
+  message: string;
+}
+
+export interface UpdateStatusResponse {
+  status: 'idle' | 'checking' | 'downloading' | 'processing' | 'completed' | 'error';
+  message: string;
+  progress: number;
+}
+
+export const checkDataFreshness = async (forceReload: boolean = false): Promise<DataFreshnessResponse> => {
+  const response = await api.get('/data-freshness', {
+    params: { force_reload: forceReload }
+  });
+  return response.data;
+};
+
+export const getUpdateStatus = async (): Promise<UpdateStatusResponse> => {
+  const response = await api.get('/update-status');
+  return response.data;
+};
+
+export const triggerDataUpdate = async (): Promise<{ status: string; message: string }> => {
+  const response = await api.post('/update-data');
+  return response.data;
+};

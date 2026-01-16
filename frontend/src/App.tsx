@@ -4,12 +4,13 @@ import FilterBar from './components/FilterBar';
 import ChartPanel from './components/ChartPanel';
 import DatasetSelector from './components/DatasetSelector';
 import ScoringPanel from './components/ScoringPanel';
+import DataUpdateButton from './components/DataUpdateButton';
 import { listDatasets, getColumns, queryData, getStats, scoreTickers } from './api';
 import type { Dataset, ColumnInfo, QueryRequest, QueryResponse, Filters, Stats, ScoringCriteria, RankedTicker } from './types';
 
 function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<string>('daily');
+  const [selectedDataset, setSelectedDataset] = useState<string>('filtered');
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [filters, setFilters] = useState<Filters>({});
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -144,8 +145,13 @@ function App() {
     try {
       const ds = await listDatasets();
       setDatasets(ds);
-      if (ds.length > 0 && !selectedDataset) {
-        setSelectedDataset(ds[0].name);
+      if (ds.length > 0) {
+        // If no dataset is selected, or the selected dataset doesn't exist, choose one
+        if (!selectedDataset || !ds.find(d => d.name === selectedDataset)) {
+          // Prefer 'filtered' dataset if it exists, otherwise use the first one
+          const filteredDataset = ds.find(d => d.name === 'filtered');
+          setSelectedDataset(filteredDataset ? filteredDataset.name : ds[0].name);
+        }
       }
     } catch (error) {
       console.error('Failed to load datasets:', error);
@@ -263,8 +269,13 @@ function App() {
     <div className="min-h-screen bg-gray-900 dark:bg-gray-900">
       <header className="bg-gray-800 dark:bg-gray-800 shadow-sm border-b border-gray-700 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-3xl font-bold text-white dark:text-white">Stonks Data Explorer</h1>
-          <p className="text-sm text-gray-400 dark:text-gray-400 mt-1">Explore and analyze stock market data</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-white dark:text-white">Stonks Data Explorer</h1>
+              <p className="text-sm text-gray-400 dark:text-gray-400 mt-1">Explore and analyze stock market data</p>
+            </div>
+            <DataUpdateButton />
+          </div>
         </div>
       </header>
 

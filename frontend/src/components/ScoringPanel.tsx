@@ -72,6 +72,8 @@ export default function ScoringPanel({
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [presetName, setPresetName] = useState('');
   const [presetDescription, setPresetDescription] = useState('');
+  const [loadedPresetId, setLoadedPresetId] = useState<string | null>(null);
+  const [saveMode, setSaveMode] = useState<'overwrite' | 'new'>('new');
   const presetMenuRef = useRef<HTMLDivElement>(null);
 
   // Close preset menu when clicking outside
@@ -227,26 +229,55 @@ export default function ScoringPanel({
 
     const description = presetDescription.trim() || generatePresetDescription();
     
-    const newPreset: ScoringPreset = {
-      id: Date.now().toString(),
-      name: presetName.trim(),
-      description,
-      criteria: [...criteria],
-      monthsBack,
-      minDays,
-      minAvgVolume,
-      minPrice,
-      maxPrice,
-      createdAt: new Date().toISOString(),
-    };
+    let updatedPresets: ScoringPreset[];
+    
+    if (saveMode === 'overwrite' && loadedPresetId) {
+      // Overwrite existing preset
+      updatedPresets = presets.map(p => 
+        p.id === loadedPresetId
+          ? {
+              ...p,
+              name: presetName.trim(),
+              description,
+              criteria: [...criteria],
+              monthsBack,
+              minDays,
+              minAvgVolume,
+              minPrice,
+              maxPrice,
+            }
+          : p
+      );
+    } else {
+      // Create new preset
+      const newPreset: ScoringPreset = {
+        id: Date.now().toString(),
+        name: presetName.trim(),
+        description,
+        criteria: [...criteria],
+        monthsBack,
+        minDays,
+        minAvgVolume,
+        minPrice,
+        maxPrice,
+        createdAt: new Date().toISOString(),
+      };
+      updatedPresets = [...presets, newPreset];
+    }
 
-    const updatedPresets = [...presets, newPreset];
     setPresets(updatedPresets);
     localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+    
+    // If saving as new, clear the loaded preset ID since we're now working with a new preset
+    if (saveMode === 'new') {
+      setLoadedPresetId(null);
+    }
+    // If overwriting, keep the loaded preset ID the same
     
     setPresetName('');
     setPresetDescription('');
     setShowSaveDialog(false);
+    setSaveMode('new');
   };
 
   const loadPreset = (preset: ScoringPreset) => {
@@ -256,6 +287,7 @@ export default function ScoringPanel({
     onMinAvgVolumeChange(preset.minAvgVolume);
     onMinPriceChange(preset.minPrice);
     onMaxPriceChange(preset.maxPrice);
+    setLoadedPresetId(preset.id);
     setShowPresetMenu(false);
   };
 
@@ -264,6 +296,9 @@ export default function ScoringPanel({
       const updatedPresets = presets.filter(p => p.id !== id);
       setPresets(updatedPresets);
       localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+      if (loadedPresetId === id) {
+        setLoadedPresetId(null);
+      }
     }
   };
 
@@ -289,6 +324,20 @@ export default function ScoringPanel({
                 <button
                   onClick={() => {
                     setPresetDescription(generatePresetDescription());
+                    if (loadedPresetId) {
+                      const loadedPreset = presets.find(p => p.id === loadedPresetId);
+                      if (loadedPreset) {
+                        setPresetName(loadedPreset.name);
+                        setPresetDescription(loadedPreset.description);
+                        setSaveMode('overwrite');
+                      } else {
+                        setPresetName('');
+                        setSaveMode('new');
+                      }
+                    } else {
+                      setPresetName('');
+                      setSaveMode('new');
+                    }
                     setShowSaveDialog(true);
                   }}
                   disabled={criteria.length === 0}
@@ -355,6 +404,7 @@ export default function ScoringPanel({
                   setShowSaveDialog(false);
                   setPresetName('');
                   setPresetDescription('');
+                  setSaveMode('new');
                 }
               }}
             >
@@ -364,6 +414,37 @@ export default function ScoringPanel({
               >
                 <h3 className="text-lg font-semibold text-white dark:text-white mb-4">Save Scoring Preset</h3>
                 <div className="space-y-4">
+                  {loadedPresetId && (
+                    <div className="bg-blue-900 bg-opacity-30 border border-blue-700 rounded p-3 mb-2">
+                      <p className="text-sm text-blue-300 mb-3">
+                        You have a preset loaded. Choose how to save:
+                      </p>
+                      <div className="space-y-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="saveMode"
+                            value="overwrite"
+                            checked={saveMode === 'overwrite'}
+                            onChange={() => setSaveMode('overwrite')}
+                            className="text-blue-600"
+                          />
+                          <span className="text-sm text-white">Overwrite current preset</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="saveMode"
+                            value="new"
+                            checked={saveMode === 'new'}
+                            onChange={() => setSaveMode('new')}
+                            className="text-blue-600"
+                          />
+                          <span className="text-sm text-white">Save as new preset</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-300 dark:text-gray-300 mb-1">
                       Preset Name *
@@ -398,6 +479,7 @@ export default function ScoringPanel({
                         setShowSaveDialog(false);
                         setPresetName('');
                         setPresetDescription('');
+                        setSaveMode('new');
                       }}
                       className="px-4 py-2 text-sm bg-gray-700 text-white rounded hover:bg-gray-600"
                     >
@@ -407,7 +489,7 @@ export default function ScoringPanel({
                       onClick={savePreset}
                       className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
                     >
-                      Save
+                      {saveMode === 'overwrite' ? 'Overwrite' : 'Save'}
                     </button>
                   </div>
                 </div>
