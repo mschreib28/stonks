@@ -7,6 +7,7 @@ This software is available under two licensing options:
 For non-commercial use, this software is licensed under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0). See the [LICENSE](LICENSE) file for full terms.
 
 **Non-commercial use includes:**
+
 - Personal projects
 - Educational purposes
 - Research and academic work
@@ -30,10 +31,11 @@ For commercial use, a separate proprietary license is required. Commercial use i
 To obtain a commercial license, please contact the licensor to discuss licensing terms and pricing.
 
 **Contact Information:**
-- Email: [Your contact email]
-- Website: [Your website, if applicable]
+
+- Email: Contact through GitHub
 
 Commercial licenses are typically granted on a case-by-case basis and may include:
+
 - Per-seat or per-organization licensing
 - Annual or perpetual licenses
 - Support and maintenance options
