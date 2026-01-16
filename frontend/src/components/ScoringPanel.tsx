@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { ScoringCriteria } from '../types';
+import { useState, useEffect, useRef } from 'react';
+import type { ScoringCriteria, ScoringPreset } from '../types';
 
 interface ScoringPanelProps {
   criteria: ScoringCriteria[];
@@ -48,6 +48,8 @@ const AVAILABLE_METRICS = [
   { name: 'current_price', label: 'Current Price', description: 'Most recent closing price' },
 ];
 
+const PRESET_STORAGE_KEY = 'stonks_scoring_presets';
+
 export default function ScoringPanel({
   criteria,
   monthsBack,
@@ -65,6 +67,24 @@ export default function ScoringPanel({
   scoring,
 }: ScoringPanelProps) {
   const [expanded, setExpanded] = useState(false);
+  const [presets, setPresets] = useState<ScoringPreset[]>([]);
+  const [showPresetMenu, setShowPresetMenu] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [presetDescription, setPresetDescription] = useState('');
+  const presetMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close preset menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (presetMenuRef.current && !presetMenuRef.current.contains(event.target as Node)) {
+        setShowPresetMenu(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside, true);
+    return () => document.removeEventListener('click', handleClickOutside, true);
+  }, []);
 
   const addCriterion = () => {
     const newCriteria: ScoringCriteria = {
@@ -142,6 +162,111 @@ export default function ScoringPanel({
     return AVAILABLE_METRICS.find(m => m.name === name)?.description || '';
   };
 
+  const getMetricLabel = (name: string) => {
+    return AVAILABLE_METRICS.find(m => m.name === name)?.label || name;
+  };
+
+  // Load presets from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(PRESET_STORAGE_KEY);
+      if (stored) {
+        setPresets(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error('Failed to load presets:', error);
+    }
+  }, []);
+
+  // Generate description from criteria
+  const generatePresetDescription = (): string => {
+    if (criteria.length === 0) {
+      return 'No criteria defined';
+    }
+
+    const parts: string[] = [];
+    
+    // Summary of criteria
+    const topCriteria = criteria
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 3)
+      .map(c => {
+        const label = getMetricLabel(c.name);
+        const range = c.min_value !== undefined || c.max_value !== undefined
+          ? ` (${c.min_value ?? 'any'}-${c.max_value ?? 'any'})`
+          : '';
+        const invert = c.invert ? ' (inverted)' : '';
+        return `${label}×${c.weight}${range}${invert}`;
+      });
+    
+    if (topCriteria.length > 0) {
+      parts.push(`Focus: ${topCriteria.join(', ')}`);
+    }
+
+    // Settings summary
+    const settings: string[] = [];
+    if (monthsBack !== 12) settings.push(`${monthsBack}mo period`);
+    if (minDays !== 60) settings.push(`${minDays} min days`);
+    if (minAvgVolume !== 750000) settings.push(`${(minAvgVolume / 1000).toFixed(0)}k vol`);
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      settings.push(`$${minPrice ?? '0'}-$${maxPrice ?? '∞'}`);
+    }
+    
+    if (settings.length > 0) {
+      parts.push(`Settings: ${settings.join(', ')}`);
+    }
+
+    return parts.join(' | ') || 'Custom scoring preset';
+  };
+
+  const savePreset = () => {
+    if (!presetName.trim()) {
+      alert('Please enter a name for the preset');
+      return;
+    }
+
+    const description = presetDescription.trim() || generatePresetDescription();
+    
+    const newPreset: ScoringPreset = {
+      id: Date.now().toString(),
+      name: presetName.trim(),
+      description,
+      criteria: [...criteria],
+      monthsBack,
+      minDays,
+      minAvgVolume,
+      minPrice,
+      maxPrice,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedPresets = [...presets, newPreset];
+    setPresets(updatedPresets);
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+    
+    setPresetName('');
+    setPresetDescription('');
+    setShowSaveDialog(false);
+  };
+
+  const loadPreset = (preset: ScoringPreset) => {
+    onCriteriaChange([...preset.criteria]);
+    onMonthsBackChange(preset.monthsBack);
+    onMinDaysChange(preset.minDays);
+    onMinAvgVolumeChange(preset.minAvgVolume);
+    onMinPriceChange(preset.minPrice);
+    onMaxPriceChange(preset.maxPrice);
+    setShowPresetMenu(false);
+  };
+
+  const deletePreset = (id: string) => {
+    if (confirm('Are you sure you want to delete this preset?')) {
+      const updatedPresets = presets.filter(p => p.id !== id);
+      setPresets(updatedPresets);
+      localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+    }
+  };
+
   return (
     <div className="bg-gray-800 dark:bg-gray-800 rounded-lg shadow p-4 space-y-4 border border-gray-700 dark:border-gray-700">
       <div className="flex items-center justify-between">
@@ -156,6 +281,140 @@ export default function ScoringPanel({
 
       {expanded && (
         <>
+          {/* Preset Management */}
+          <div className="border-b border-gray-700 dark:border-gray-700 pb-3">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-300 dark:text-gray-300">Presets</h3>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setPresetDescription(generatePresetDescription());
+                    setShowSaveDialog(true);
+                  }}
+                  disabled={criteria.length === 0}
+                  className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save Preset
+                </button>
+                <div className="relative" ref={presetMenuRef}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowPresetMenu(!showPresetMenu);
+                    }}
+                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    Load Preset {presets.length > 0 && `(${presets.length})`}
+                  </button>
+                  {showPresetMenu && presets.length > 0 && (
+                    <div className="absolute top-full right-0 mt-1 z-50 bg-gray-800 dark:bg-gray-800 border border-gray-700 dark:border-gray-700 rounded-lg shadow-lg min-w-[300px] max-h-[400px] overflow-y-auto">
+                      {presets.map((preset) => (
+                        <div key={preset.id} className="p-3 border-b border-gray-700 dark:border-gray-700 last:border-b-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-white dark:text-white text-sm mb-1">
+                                {preset.name}
+                              </div>
+                              <div className="text-xs text-gray-400 dark:text-gray-400 mb-2">
+                                {preset.description}
+                              </div>
+                              <div className="text-xs text-gray-500 dark:text-gray-500">
+                                {preset.criteria.length} criteria • {new Date(preset.createdAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1 flex-shrink-0">
+                              <button
+                                onClick={() => loadPreset(preset)}
+                                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              >
+                                Load
+                              </button>
+                              <button
+                                onClick={() => deletePreset(preset.id)}
+                                className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Save Preset Dialog */}
+          {showSaveDialog && (
+            <div 
+              className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  setShowSaveDialog(false);
+                  setPresetName('');
+                  setPresetDescription('');
+                }
+              }}
+            >
+              <div 
+                className="bg-gray-800 dark:bg-gray-800 border border-gray-700 dark:border-gray-700 rounded-lg p-6 max-w-md w-full mx-4"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-lg font-semibold text-white dark:text-white mb-4">Save Scoring Preset</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 dark:text-gray-300 mb-1">
+                      Preset Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={presetName}
+                      onChange={(e) => setPresetName(e.target.value)}
+                      placeholder="e.g., Swing Trading Strategy"
+                      className="w-full px-3 py-2 text-sm border border-gray-600 dark:border-gray-600 rounded bg-gray-700 dark:bg-gray-700 text-white dark:text-white"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 dark:text-gray-300 mb-1">
+                      Description
+                    </label>
+                    <textarea
+                      value={presetDescription}
+                      onChange={(e) => setPresetDescription(e.target.value)}
+                      placeholder="Auto-generated description based on criteria..."
+                      rows={3}
+                      className="w-full px-3 py-2 text-sm border border-gray-600 dark:border-gray-600 rounded bg-gray-700 dark:bg-gray-700 text-white dark:text-white"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Leave empty to auto-generate from criteria
+                    </p>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => {
+                        setShowSaveDialog(false);
+                        setPresetName('');
+                        setPresetDescription('');
+                      }}
+                      className="px-4 py-2 text-sm bg-gray-700 text-white rounded hover:bg-gray-600"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={savePreset}
+                      className="px-4 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3">
             <div>
               <label className="block text-sm font-medium text-gray-300 dark:text-gray-300 mb-1">
