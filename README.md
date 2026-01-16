@@ -99,7 +99,7 @@ Download Polygon data files and organize them in the structure above:
 **Recommended approach:** Use the helper script to process all data with recommended defaults:
 
 ```bash
-python process_all_data.py
+python data_processing/process_all_data.py
 ```
 
 This script:
@@ -112,10 +112,10 @@ This script:
 **Options:**
 ```bash
 # Force reprocess everything (ignore existing outputs)
-python process_all_data.py --force
+python data_processing/process_all_data.py --force
 
 # Process only specific steps
-python process_all_data.py --steps daily minute
+python data_processing/process_all_data.py --steps daily minute
 
 # Available steps: daily, minute, macd, join
 ```
@@ -234,7 +234,7 @@ This creates an enriched dataset combining volatility features with MACD indicat
 
 **Option 1: Use the helper script (recommended)**
 ```bash
-python process_all_data.py
+python data_processing/process_all_data.py
 ```
 
 **Option 2: Manual step-by-step processing**
@@ -281,12 +281,12 @@ This starts:
 
 **Terminal 1 - API Server:**
 ```bash
-python api_server.py
+python backend/api_server.py
 ```
 
 Or with auto-reload:
 ```bash
-uvicorn api_server:app --reload
+uvicorn backend.api_server:app --reload
 ```
 
 **Terminal 2 - Frontend:**
@@ -312,8 +312,8 @@ npm run dev
 
 ```
 .
-├── process_all_data.py                 # Helper script: process all data with defaults
 ├── data_processing/                    # Data processing scripts
+│   ├── process_all_data.py             # Helper script: process all data with defaults
 │   ├── build_polygon_cache.py          # Main data processing pipeline
 │   ├── build_macd_cache.py             # MACD feature generation (full)
 │   ├── build_macd_day_features_incremental.py  # MACD features (incremental)
@@ -321,9 +321,13 @@ npm run dev
 │   ├── build_training_dataset.py       # Build ML training dataset
 │   ├── build_event_labels.py           # Build event labels
 │   ├── build_range_expansion_labels.py # Build range expansion labels
+│   ├── update_and_process_data.py      # Download and process data
+│   ├── clean_non_tradable_tickers.py   # Clean non-tradable tickers
 │   └── check_missing.py                # Check for missing data files
-├── api_server.py                       # FastAPI backend server
-├── test_api.py                         # API testing script
+├── backend/
+│   └── api_server.py                   # FastAPI backend server
+├── tests/
+│   └── test_api.py                     # API testing script
 ├── start_dev.sh                        # Convenience startup script
 ├── data/                               # Data directory
 │   └── 2025/
@@ -425,7 +429,7 @@ Combines all columns from `minute_features` with all MACD columns.
 **API server won't start:**
 ```bash
 # Test setup
-python test_api.py
+python tests/test_api.py
 
 # Install missing packages
 uv sync
@@ -451,9 +455,10 @@ tail -f api_server.log  # if using start_dev.sh
 **No data showing:**
 ```bash
 # Ensure cache files are built
-python process_all_data.py
+python data_processing/process_all_data.py
 # Or manually:
 python data_processing/build_polygon_cache.py --input-root data/2025/polygon_day_aggs --add-returns
+```
 
 # Check which datasets are available
 curl http://localhost:8000/api/datasets
@@ -498,4 +503,25 @@ npm run build  # Check for TypeScript errors
 
 ## License
 
-[Add your license here]
+This project is dual-licensed:
+
+### Non-Commercial Use
+
+For non-commercial use, this software is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**.
+
+You are free to:
+- Share and redistribute the software
+- Adapt and modify the software
+- Use the software for personal, educational, or research purposes
+
+Under the following terms:
+- **Attribution**: You must give appropriate credit
+- **NonCommercial**: You may not use the software for commercial purposes
+
+See the [LICENSE](LICENSE) file for the full license text.
+
+### Commercial Use
+
+For commercial use, a separate proprietary license is required. Commercial use includes any use in for-profit products, services, or organizations that generate revenue.
+
+To obtain a commercial license, please contact the licensor. See [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) for more information.

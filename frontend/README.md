@@ -37,11 +37,11 @@ npm run build
 Make sure the FastAPI backend server is running on port 8000. Start it with:
 
 ```bash
-python api_server.py
+python backend/api_server.py
 ```
 
 Or using uvicorn directly:
 ```bash
-uvicorn api_server:app --reload
+uvicorn backend.api_server:app --reload
 ```
 
