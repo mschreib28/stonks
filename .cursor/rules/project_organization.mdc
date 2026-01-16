@@ -1,0 +1,25 @@
+# Project Organization Rules
+
+## Root Directory Organization
+
+The root of the project should be kept organized with as few loose files as possible. Files should be organized into folders that are appropriate for their content.
+
+### Guidelines
+
+- **Scripts and utilities**: Place data processing scripts, build scripts, and utility scripts in appropriate subdirectories (e.g., `data_processing/`, `utils/`)
+- **Configuration files**: Keep essential configuration files (e.g., `pyproject.toml`, `package.json`) in the root, but organize others appropriately
+- **Documentation**: Place documentation files in appropriate locations (e.g., `README.md` in root, detailed docs in `docs/` if needed)
+- **Entry points**: Only keep essential entry point files (e.g., `main.py`, `api_server.py`) in the root if they are the primary application entry points
+
+### When adding new files
+
+- Consider if the file belongs in an existing subdirectory
+- Create new subdirectories when a logical grouping emerges
+- Avoid cluttering the root with multiple similar files (e.g., multiple `build_*.py` scripts should be in `data_processing/` or similar)
+
+### Examples
+
+- ✅ `data_processing/build_event_labels.py` - organized in appropriate folder
+- ✅ `utils/ticker_filter.py` - organized in appropriate folder
+- ❌ `build_event_labels.py` in root - should be in `data_processing/`
+- ❌ Multiple loose utility scripts in root - should be in `utils/` or similar
