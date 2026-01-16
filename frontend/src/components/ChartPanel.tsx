@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createChart, IChartApi, CandlestickData, HistogramData, Time, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 import { getTickerData } from '../api';
 
@@ -8,9 +8,12 @@ interface ChartPanelProps {
   onClose: () => void;
 }
 
+type TimePeriod = '1d' | '5d' | '30d' | '6mo' | '12mo';
+
 export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('12mo');
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<any>(null);
@@ -18,6 +21,85 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
   const macdSeriesRef = useRef<any>(null);
   const signalSeriesRef = useRef<any>(null);
   const histSeriesRef = useRef<any>(null);
+
+  // Calculate date range based on selected time period
+  const getDateRange = (period: TimePeriod, dataArray: any[]): { from: Time; to: Time } | null => {
+    if (dataArray.length === 0) return null;
+
+    const dateCol = dataArray[0].date ? 'date' : dataArray[0].week_start ? 'week_start' : Object.keys(dataArray[0])[1];
+    
+    // Find the latest date in the data
+    let latestDate: Date | null = null;
+    for (let i = dataArray.length - 1; i >= 0; i--) {
+      const dateStr = dataArray[i][dateCol];
+      if (dateStr) {
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          latestDate = date;
+          break;
+        }
+      }
+    }
+
+    if (!latestDate) return null;
+
+    const to = (latestDate.getTime() / 1000) as Time;
+    let fromDate: Date;
+
+    switch (period) {
+      case '1d':
+        fromDate = new Date(latestDate);
+        fromDate.setDate(fromDate.getDate() - 1);
+        break;
+      case '5d':
+        fromDate = new Date(latestDate);
+        fromDate.setDate(fromDate.getDate() - 5);
+        break;
+      case '30d':
+        fromDate = new Date(latestDate);
+        fromDate.setDate(fromDate.getDate() - 30);
+        break;
+      case '6mo':
+        fromDate = new Date(latestDate);
+        fromDate.setMonth(fromDate.getMonth() - 6);
+        break;
+      case '12mo':
+        fromDate = new Date(latestDate);
+        fromDate.setFullYear(fromDate.getFullYear() - 1);
+        break;
+      default:
+        fromDate = new Date(latestDate);
+        fromDate.setFullYear(fromDate.getFullYear() - 1);
+    }
+
+    return {
+      from: (fromDate.getTime() / 1000) as Time,
+      to,
+    };
+  };
+
+  // Update chart visible range when time period or data changes
+  const updateVisibleRange = () => {
+    if (!chartRef.current || data.length === 0) return;
+    
+    const range = getDateRange(timePeriod, data);
+    if (range) {
+      chartRef.current.timeScale().setVisibleRange(range);
+    }
+  };
+
+  const loadTickerData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Load more data to ensure we have enough for longer periods
+      const response = await getTickerData(dataset, ticker, 500);
+      setData(response.data.reverse()); // Reverse to show chronological order
+    } catch (error) {
+      console.error('Failed to load ticker data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [dataset, ticker]);
 
   useEffect(() => {
     // Reset data when ticker/dataset changes to trigger re-initialization
@@ -36,7 +118,7 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
     }
     
     loadTickerData();
-  }, [dataset, ticker]);
+  }, [dataset, ticker, loadTickerData]);
 
   // Initialize chart - reinitialize when data is loaded and ready
   useEffect(() => {
@@ -266,8 +348,11 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
         }
       }
 
-      // Fit content after setting data
-      chart.timeScale().fitContent();
+      // Set visible range based on selected time period
+      const range = getDateRange(timePeriod, data);
+      if (range) {
+        chart.timeScale().setVisibleRange(range);
+      }
     };
 
     // Handle resize
@@ -434,23 +519,9 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
       }
     }
 
-    // Fit content after setting data
-    if (chartRef.current) {
-      chartRef.current.timeScale().fitContent();
-    }
-  }, [data]);
-
-  const loadTickerData = async () => {
-    setLoading(true);
-    try {
-      const response = await getTickerData(dataset, ticker, 100);
-      setData(response.data.reverse()); // Reverse to show chronological order
-    } catch (error) {
-      console.error('Failed to load ticker data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // Update visible range when data changes
+    updateVisibleRange();
+  }, [data, timePeriod]);
 
   if (data.length === 0 && !loading) {
     return (
@@ -484,26 +555,48 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
   return (
     <div className="bg-gray-900 dark:bg-gray-900 rounded-lg shadow-lg border border-gray-800 dark:border-gray-800">
       {/* Header - TradingView Style */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 dark:border-gray-800">
-        <div className="flex items-baseline gap-4">
-          <h2 className="text-xl font-bold text-white">{ticker}</h2>
-          {currentPrice && (
-            <div className="flex items-center gap-3">
-              <span className={`text-2xl font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>
-                ${currentPrice.toFixed(2)}
-              </span>
-              <span className={`text-sm font-medium ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {change >= 0 ? '+' : ''}{change.toFixed(2)} ({changePercent >= 0 ? '+' : ''}{changePercent.toFixed(2)}%)
-              </span>
-            </div>
-          )}
+      <div className="flex flex-col border-b border-gray-800 dark:border-gray-800">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-baseline gap-4">
+            <h2 className="text-xl font-bold text-white">{ticker}</h2>
+            {currentPrice && (
+              <div className="flex items-center gap-3">
+                <span className={`text-2xl font-bold ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+                  ${currentPrice.toFixed(2)}
+                </span>
+                <span className={`text-sm font-medium ${change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {change >= 0 ? '+' : ''}{change.toFixed(2)} ({changePercent >= 0 ? '+' : ''}{changePercent.toFixed(2)}%)
+                </span>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 dark:text-gray-400 hover:text-gray-300 dark:hover:text-gray-300 text-xl w-8 h-8 flex items-center justify-center rounded hover:bg-gray-800 transition-colors"
+          >
+            ✕
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="text-gray-400 dark:text-gray-400 hover:text-gray-300 dark:hover:text-gray-300 text-xl w-8 h-8 flex items-center justify-center rounded hover:bg-gray-800 transition-colors"
-        >
-          ✕
-        </button>
+        {/* Time Period Buttons */}
+        <div className="flex items-center gap-2 px-4 pb-3">
+          {(['1d', '5d', '30d', '6mo', '12mo'] as TimePeriod[]).map((period) => (
+            <button
+              key={period}
+              onClick={() => {
+                setTimePeriod(period);
+                // Update range immediately
+                setTimeout(() => updateVisibleRange(), 0);
+              }}
+              className={`px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                timePeriod === period
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+              }`}
+            >
+              {period}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* TradingView-style Chart */}
