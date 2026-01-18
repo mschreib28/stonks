@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import DataTable from './components/DataTable';
 import FilterBar from './components/FilterBar';
 import ChartPanel from './components/ChartPanel';
 import DatasetSelector from './components/DatasetSelector';
 import ScoringPanel from './components/ScoringPanel';
 import DataUpdateButton from './components/DataUpdateButton';
+import FactorEvaluationPanel from './components/FactorEvaluationPanel';
+import PerformancePanel from './components/PerformancePanel';
 import { listDatasets, getColumns, queryData, getStats, scoreTickers } from './api';
 import type { Dataset, ColumnInfo, QueryRequest, QueryResponse, Filters, Stats, ScoringCriteria, RankedTicker } from './types';
 
@@ -128,19 +130,6 @@ function App() {
     window.history.replaceState({}, '', newUrl);
   }, [selectedDataset, selectedTicker, filters, activeFilters, page, pageSize, sortBy, sortDesc]);
 
-  useEffect(() => {
-    if (selectedDataset) {
-      loadColumns();
-      loadStats();
-    }
-  }, [selectedDataset]);
-
-  useEffect(() => {
-    if (selectedDataset && columns.length > 0 && !useRankedResults) {
-      loadData();
-    }
-  }, [selectedDataset, filters, sortBy, sortDesc, page, pageSize, useRankedResults]);
-
   const loadDatasets = async () => {
     try {
       const ds = await listDatasets();
@@ -160,10 +149,27 @@ function App() {
 
   const loadColumns = async () => {
     try {
+      setColumns([]); // Clear columns first
       const cols = await getColumns(selectedDataset);
       setColumns(cols);
+      
+      // Clean up filters that don't exist in the new dataset
+      if (cols.length > 0) {
+        const columnNames = new Set(cols.map((col) => col.name));
+        setActiveFilters((prev) => prev.filter((f) => columnNames.has(f)));
+        setFilters((prev) => {
+          const validFilters: Filters = {};
+          Object.entries(prev).forEach(([key, value]) => {
+            if (columnNames.has(key)) {
+              validFilters[key] = value;
+            }
+          });
+          return validFilters;
+        });
+      }
     } catch (error) {
       console.error('Failed to load columns:', error);
+      setColumns([]); // Clear on error
     }
   };
 
@@ -176,7 +182,11 @@ function App() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!selectedDataset || columns.length === 0) {
+      return; // Don't load if dataset or columns aren't ready
+    }
+    
     setLoading(true);
     try {
       // Only apply filters that exist in the current dataset columns
@@ -200,10 +210,29 @@ function App() {
       setData(response);
     } catch (error) {
       console.error('Failed to load data:', error);
+      setData(null); // Clear data on error
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedDataset, columns, filters, sortBy, sortDesc, page, pageSize]);
+
+  useEffect(() => {
+    if (selectedDataset) {
+      // Clear columns and data when dataset changes to prevent stale data
+      setColumns([]);
+      setData(null);
+      loadColumns();
+      loadStats();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDataset]); // loadColumns and loadStats are stable functions that use selectedDataset
+
+
+  useEffect(() => {
+    if (selectedDataset && columns.length > 0 && !useRankedResults) {
+      loadData();
+    }
+  }, [selectedDataset, columns, filters, sortBy, sortDesc, page, pageSize, useRankedResults, loadData]);
 
   const handleFilterChange = (newFilters: Filters) => {
     setFilters(newFilters);
@@ -315,7 +344,12 @@ function App() {
               onMaxPriceChange={setMaxPrice}
               onScore={handleScoreTickers}
               scoring={scoring}
+              onDatasetChange={setSelectedDataset}
             />
+
+            <FactorEvaluationPanel />
+
+            <PerformancePanel ticker={selectedTicker || undefined} />
           </div>
 
           {/* Main Content */}

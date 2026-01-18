@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { createChart, IChartApi, CandlestickData, HistogramData, Time, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
+import { createChart, IChartApi, CandlestickData, HistogramData, Time, CandlestickSeries, HistogramSeries, LineSeries, LineData } from 'lightweight-charts';
 import { getTickerData } from '../api';
 
 interface ChartPanelProps {
@@ -10,10 +10,122 @@ interface ChartPanelProps {
 
 type TimePeriod = '1d' | '5d' | '30d' | '6mo' | '12mo';
 
+// Technical indicator calculation functions
+const calculateSMA = (data: number[], period: number): (number | null)[] => {
+  const result: (number | null)[] = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) {
+      result.push(null);
+    } else {
+      let sum = 0;
+      for (let j = 0; j < period; j++) {
+        sum += data[i - j];
+      }
+      result.push(sum / period);
+    }
+  }
+  return result;
+};
+
+const calculateBollingerBands = (data: number[], period: number = 20, stdDev: number = 2): {
+  upper: (number | null)[];
+  middle: (number | null)[];
+  lower: (number | null)[];
+} => {
+  const middle = calculateSMA(data, period);
+  const upper: (number | null)[] = [];
+  const lower: (number | null)[] = [];
+
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1 || middle[i] === null) {
+      upper.push(null);
+      lower.push(null);
+    } else {
+      let sumSquares = 0;
+      for (let j = 0; j < period; j++) {
+        sumSquares += Math.pow(data[i - j] - middle[i]!, 2);
+      }
+      const std = Math.sqrt(sumSquares / period);
+      upper.push(middle[i]! + stdDev * std);
+      lower.push(middle[i]! - stdDev * std);
+    }
+  }
+
+  return { upper, middle, lower };
+};
+
+const calculateRSI = (data: number[], period: number = 14): (number | null)[] => {
+  const result: (number | null)[] = [];
+  const gains: number[] = [];
+  const losses: number[] = [];
+
+  for (let i = 0; i < data.length; i++) {
+    if (i === 0) {
+      result.push(null);
+      gains.push(0);
+      losses.push(0);
+      continue;
+    }
+
+    const change = data[i] - data[i - 1];
+    gains.push(change > 0 ? change : 0);
+    losses.push(change < 0 ? -change : 0);
+
+    if (i < period) {
+      result.push(null);
+      continue;
+    }
+
+    let avgGain = 0;
+    let avgLoss = 0;
+
+    if (i === period) {
+      // First RSI calculation uses simple average
+      for (let j = 1; j <= period; j++) {
+        avgGain += gains[j];
+        avgLoss += losses[j];
+      }
+      avgGain /= period;
+      avgLoss /= period;
+    } else {
+      // Subsequent calculations use exponential average
+      const prevRSI = result[i - 1];
+      if (prevRSI !== null) {
+        // Calculate previous averages from previous RSI
+        const prevRS = (100 - prevRSI) === 0 ? Infinity : prevRSI / (100 - prevRSI);
+        // This is approximate, use simple smoothing
+        for (let j = i - period + 1; j <= i; j++) {
+          avgGain += gains[j];
+          avgLoss += losses[j];
+        }
+        avgGain /= period;
+        avgLoss /= period;
+      }
+    }
+
+    if (avgLoss === 0) {
+      result.push(100);
+    } else {
+      const rs = avgGain / avgLoss;
+      result.push(100 - 100 / (1 + rs));
+    }
+  }
+
+  return result;
+};
+
 export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('12mo');
+  
+  // Technical indicator toggles
+  const [showSMA20, setShowSMA20] = useState<boolean>(false);
+  const [showSMA50, setShowSMA50] = useState<boolean>(false);
+  const [showSMA200, setShowSMA200] = useState<boolean>(false);
+  const [showBollinger, setShowBollinger] = useState<boolean>(false);
+  const [showRSI, setShowRSI] = useState<boolean>(false);
+  
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candlestickSeriesRef = useRef<any>(null);
@@ -21,6 +133,15 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
   const macdSeriesRef = useRef<any>(null);
   const signalSeriesRef = useRef<any>(null);
   const histSeriesRef = useRef<any>(null);
+  
+  // Technical indicator series refs
+  const sma20SeriesRef = useRef<any>(null);
+  const sma50SeriesRef = useRef<any>(null);
+  const sma200SeriesRef = useRef<any>(null);
+  const bbUpperSeriesRef = useRef<any>(null);
+  const bbMiddleSeriesRef = useRef<any>(null);
+  const bbLowerSeriesRef = useRef<any>(null);
+  const rsiSeriesRef = useRef<any>(null);
 
   // Calculate date range based on selected time period
   const getDateRange = (period: TimePeriod, dataArray: any[]): { from: Time; to: Time } | null => {
@@ -28,49 +149,60 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
 
     const dateCol = dataArray[0].date ? 'date' : dataArray[0].week_start ? 'week_start' : Object.keys(dataArray[0])[1];
     
-    // Find the latest date in the data
+    // Find the earliest and latest dates in the data
+    let earliestDate: Date | null = null;
     let latestDate: Date | null = null;
-    for (let i = dataArray.length - 1; i >= 0; i--) {
+    
+    for (let i = 0; i < dataArray.length; i++) {
       const dateStr = dataArray[i][dateCol];
       if (dateStr) {
         const date = new Date(dateStr);
         if (!isNaN(date.getTime())) {
-          latestDate = date;
-          break;
+          if (!earliestDate || date < earliestDate) {
+            earliestDate = date;
+          }
+          if (!latestDate || date > latestDate) {
+            latestDate = date;
+          }
         }
       }
     }
 
-    if (!latestDate) return null;
+    if (!latestDate || !earliestDate) return null;
 
     const to = (latestDate.getTime() / 1000) as Time;
-    let fromDate: Date;
+    let requestedFromDate: Date;
 
+    // Calculate the requested range based on period
     switch (period) {
       case '1d':
-        fromDate = new Date(latestDate);
-        fromDate.setDate(fromDate.getDate() - 1);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setDate(requestedFromDate.getDate() - 1);
         break;
       case '5d':
-        fromDate = new Date(latestDate);
-        fromDate.setDate(fromDate.getDate() - 5);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setDate(requestedFromDate.getDate() - 5);
         break;
       case '30d':
-        fromDate = new Date(latestDate);
-        fromDate.setDate(fromDate.getDate() - 30);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setDate(requestedFromDate.getDate() - 30);
         break;
       case '6mo':
-        fromDate = new Date(latestDate);
-        fromDate.setMonth(fromDate.getMonth() - 6);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setMonth(requestedFromDate.getMonth() - 6);
         break;
       case '12mo':
-        fromDate = new Date(latestDate);
-        fromDate.setFullYear(fromDate.getFullYear() - 1);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setFullYear(requestedFromDate.getFullYear() - 1);
         break;
       default:
-        fromDate = new Date(latestDate);
-        fromDate.setFullYear(fromDate.getFullYear() - 1);
+        requestedFromDate = new Date(latestDate);
+        requestedFromDate.setFullYear(requestedFromDate.getFullYear() - 1);
     }
+
+    // Use the intersection: take the later of requested start or actual earliest date
+    // This ensures we show all available data if the requested range is larger than available
+    const fromDate = requestedFromDate > earliestDate ? requestedFromDate : earliestDate;
 
     return {
       from: (fromDate.getTime() / 1000) as Time,
@@ -92,7 +224,37 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
     setLoading(true);
     try {
       // Load more data to ensure we have enough for longer periods
-      const response = await getTickerData(dataset, ticker, 500);
+      // Request enough data to cover 12 months (approximately 252 trading days)
+      // Use a larger limit to ensure we get historical data
+      const response = await getTickerData(dataset, ticker, 5000);
+      
+      // If filtered dataset has limited data, try daily dataset for more history
+      if (dataset === 'filtered' && response.total < 200 && response.returned < 200) {
+        try {
+          // Request significantly more data from daily dataset to cover historical periods
+          // 12 months = ~252 trading days, but request more to be safe (e.g., 2 years = ~500 days)
+          const dailyResponse = await getTickerData('daily', ticker, 10000);
+          if (dailyResponse.total > response.total) {
+            console.log(`Using daily dataset for ${ticker} (${dailyResponse.total} records vs ${response.total} in filtered)`);
+            
+            // Debug: Check date range of returned data
+            if (dailyResponse.data && dailyResponse.data.length > 0) {
+              const dateCol = dailyResponse.data[0].date ? 'date' : dailyResponse.data[0].week_start ? 'week_start' : Object.keys(dailyResponse.data[0])[1];
+              const dates = dailyResponse.data.map((row: any) => row[dateCol]).filter(Boolean);
+              if (dates.length > 0) {
+                const sortedDates = [...dates].sort();
+                console.log(`Date range: ${sortedDates[0]} to ${sortedDates[sortedDates.length - 1]} (${dates.length} records)`);
+              }
+            }
+            
+            setData(dailyResponse.data.reverse());
+            return;
+          }
+        } catch (e) {
+          console.warn('Could not load daily dataset, using filtered data:', e);
+        }
+      }
+      
       setData(response.data.reverse()); // Reverse to show chronological order
     } catch (error) {
       console.error('Failed to load ticker data:', error);
@@ -115,10 +277,195 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
       macdSeriesRef.current = null;
       signalSeriesRef.current = null;
       histSeriesRef.current = null;
+      sma20SeriesRef.current = null;
+      sma50SeriesRef.current = null;
+      sma200SeriesRef.current = null;
+      bbUpperSeriesRef.current = null;
+      bbMiddleSeriesRef.current = null;
+      bbLowerSeriesRef.current = null;
+      rsiSeriesRef.current = null;
     }
     
     loadTickerData();
   }, [dataset, ticker, loadTickerData]);
+
+  // Update technical indicators when toggles change
+  const updateTechnicalIndicators = useCallback(() => {
+    if (!chartRef.current || data.length === 0) return;
+    
+    const chart = chartRef.current;
+    const dateCol = data[0].date ? 'date' : data[0].week_start ? 'week_start' : Object.keys(data[0])[1];
+    
+    // Extract close prices and timestamps
+    const closeData: { time: Time; close: number }[] = [];
+    data.forEach((row) => {
+      const close = row.close || row.close_w;
+      const date = row[dateCol];
+      if (close && date) {
+        closeData.push({
+          time: new Date(date).getTime() / 1000 as Time,
+          close,
+        });
+      }
+    });
+    closeData.sort((a, b) => (a.time as number) - (b.time as number));
+    
+    const closePrices = closeData.map(d => d.close);
+    const timestamps = closeData.map(d => d.time);
+
+    // SMA 20
+    if (showSMA20) {
+      const sma20 = calculateSMA(closePrices, 20);
+      const sma20Data: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: sma20[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      
+      if (!sma20SeriesRef.current) {
+        sma20SeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#f59e0b',
+          lineWidth: 1,
+          title: 'SMA 20',
+        }, 0);
+      }
+      sma20SeriesRef.current.setData(sma20Data);
+    } else if (sma20SeriesRef.current) {
+      chart.removeSeries(sma20SeriesRef.current);
+      sma20SeriesRef.current = null;
+    }
+
+    // SMA 50
+    if (showSMA50) {
+      const sma50 = calculateSMA(closePrices, 50);
+      const sma50Data: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: sma50[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      
+      if (!sma50SeriesRef.current) {
+        sma50SeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#3b82f6',
+          lineWidth: 1,
+          title: 'SMA 50',
+        }, 0);
+      }
+      sma50SeriesRef.current.setData(sma50Data);
+    } else if (sma50SeriesRef.current) {
+      chart.removeSeries(sma50SeriesRef.current);
+      sma50SeriesRef.current = null;
+    }
+
+    // SMA 200
+    if (showSMA200) {
+      const sma200 = calculateSMA(closePrices, 200);
+      const sma200Data: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: sma200[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      
+      if (!sma200SeriesRef.current) {
+        sma200SeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#8b5cf6',
+          lineWidth: 1,
+          title: 'SMA 200',
+        }, 0);
+      }
+      sma200SeriesRef.current.setData(sma200Data);
+    } else if (sma200SeriesRef.current) {
+      chart.removeSeries(sma200SeriesRef.current);
+      sma200SeriesRef.current = null;
+    }
+
+    // Bollinger Bands
+    if (showBollinger) {
+      const bb = calculateBollingerBands(closePrices, 20, 2);
+      const bbUpperData: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: bb.upper[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      const bbMiddleData: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: bb.middle[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      const bbLowerData: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: bb.lower[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      
+      if (!bbUpperSeriesRef.current) {
+        bbUpperSeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#ef4444',
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          title: 'BB Upper',
+        }, 0);
+      }
+      if (!bbMiddleSeriesRef.current) {
+        bbMiddleSeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#6b7280',
+          lineWidth: 1,
+          title: 'BB Middle',
+        }, 0);
+      }
+      if (!bbLowerSeriesRef.current) {
+        bbLowerSeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#22c55e',
+          lineWidth: 1,
+          lineStyle: 2, // Dashed
+          title: 'BB Lower',
+        }, 0);
+      }
+      bbUpperSeriesRef.current.setData(bbUpperData);
+      bbMiddleSeriesRef.current.setData(bbMiddleData);
+      bbLowerSeriesRef.current.setData(bbLowerData);
+    } else {
+      if (bbUpperSeriesRef.current) {
+        chart.removeSeries(bbUpperSeriesRef.current);
+        bbUpperSeriesRef.current = null;
+      }
+      if (bbMiddleSeriesRef.current) {
+        chart.removeSeries(bbMiddleSeriesRef.current);
+        bbMiddleSeriesRef.current = null;
+      }
+      if (bbLowerSeriesRef.current) {
+        chart.removeSeries(bbLowerSeriesRef.current);
+        bbLowerSeriesRef.current = null;
+      }
+    }
+
+    // RSI
+    if (showRSI) {
+      const rsi = calculateRSI(closePrices, 14);
+      const rsiData: LineData[] = timestamps
+        .map((t, i) => ({ time: t, value: rsi[i] }))
+        .filter(d => d.value !== null) as LineData[];
+      
+      // RSI goes in pane 3 (after MACD in pane 2)
+      const paneIndex = macdSeriesRef.current ? 3 : 2;
+      
+      if (!rsiSeriesRef.current) {
+        rsiSeriesRef.current = chart.addSeries(LineSeries, {
+          color: '#ec4899',
+          lineWidth: 1,
+          title: 'RSI 14',
+          priceFormat: {
+            type: 'price',
+            precision: 1,
+            minMove: 0.1,
+          },
+        }, paneIndex);
+        
+        // Set RSI pane height
+        const panes = chart.panes();
+        if (panes.length > paneIndex) {
+          panes[paneIndex].setHeight(100);
+        }
+      }
+      rsiSeriesRef.current.setData(rsiData);
+    } else if (rsiSeriesRef.current) {
+      chart.removeSeries(rsiSeriesRef.current);
+      rsiSeriesRef.current = null;
+    }
+  }, [data, showSMA20, showSMA50, showSMA200, showBollinger, showRSI]);
+
+  // Update indicators when toggles change
+  useEffect(() => {
+    updateTechnicalIndicators();
+  }, [showSMA20, showSMA50, showSMA200, showBollinger, showRSI, updateTechnicalIndicators]);
 
   // Initialize chart - reinitialize when data is loaded and ready
   useEffect(() => {
@@ -292,12 +639,28 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
       signalData.sort((a, b) => (a.time as number) - (b.time as number));
       histData.sort((a, b) => (a.time as number) - (b.time as number));
 
+      // Deduplicate by timestamp - keep last occurrence of each timestamp
+      const deduplicateByTime = <T extends { time: Time }>(arr: T[]): T[] => {
+        const seen = new Map<number, T>();
+        for (const item of arr) {
+          const timeNum = item.time as number;
+          seen.set(timeNum, item); // Keep last occurrence
+        }
+        return Array.from(seen.values()).sort((a, b) => (a.time as number) - (b.time as number));
+      };
+
+      const deduplicatedCandlestickData = deduplicateByTime(candlestickData);
+      const deduplicatedVolumeData = deduplicateByTime(volumeData);
+      const deduplicatedMacdData = deduplicateByTime(macdData);
+      const deduplicatedSignalData = deduplicateByTime(signalData);
+      const deduplicatedHistData = deduplicateByTime(histData);
+
       // Set data
-      candlestickSeries.setData(candlestickData);
-      volumeSeries.setData(volumeData);
+      candlestickSeries.setData(deduplicatedCandlestickData);
+      volumeSeries.setData(deduplicatedVolumeData);
       
       // Create MACD series if data is available and series don't exist
-      if (hasMacd && macdData.length > 0) {
+      if (hasMacd && deduplicatedMacdData.length > 0) {
         if (!macdSeriesRef.current) {
           macdSeriesRef.current = chart.addSeries(LineSeries, {
             color: '#3b82f6',
@@ -323,9 +686,9 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
           }, 2);
         }
 
-        macdSeriesRef.current.setData(macdData);
-        signalSeriesRef.current.setData(signalData);
-        histSeriesRef.current.setData(histData);
+        macdSeriesRef.current.setData(deduplicatedMacdData);
+        signalSeriesRef.current.setData(deduplicatedSignalData);
+        histSeriesRef.current.setData(deduplicatedHistData);
 
         // Set MACD pane height
         const panes = chart.panes();
@@ -463,12 +826,28 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
     signalData.sort((a, b) => (a.time as number) - (b.time as number));
     histData.sort((a, b) => (a.time as number) - (b.time as number));
 
+    // Deduplicate by timestamp - keep last occurrence of each timestamp
+    const deduplicateByTime = <T extends { time: Time }>(arr: T[]): T[] => {
+      const seen = new Map<number, T>();
+      for (const item of arr) {
+        const timeNum = item.time as number;
+        seen.set(timeNum, item); // Keep last occurrence
+      }
+      return Array.from(seen.values()).sort((a, b) => (a.time as number) - (b.time as number));
+    };
+
+    const deduplicatedCandlestickData = deduplicateByTime(candlestickData);
+    const deduplicatedVolumeData = deduplicateByTime(volumeData);
+    const deduplicatedMacdData = deduplicateByTime(macdData);
+    const deduplicatedSignalData = deduplicateByTime(signalData);
+    const deduplicatedHistData = deduplicateByTime(histData);
+
     // Set data
-    candlestickSeriesRef.current.setData(candlestickData);
-    volumeSeriesRef.current.setData(volumeData);
+    candlestickSeriesRef.current.setData(deduplicatedCandlestickData);
+    volumeSeriesRef.current.setData(deduplicatedVolumeData);
     
     // Create MACD series if data is available and series don't exist
-    if (hasMacd && macdData.length > 0) {
+    if (hasMacd && deduplicatedMacdData.length > 0) {
       if (!macdSeriesRef.current) {
         macdSeriesRef.current = chartRef.current.addSeries(LineSeries, {
           color: '#3b82f6',
@@ -494,9 +873,9 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
         }, 2);
       }
 
-      macdSeriesRef.current.setData(macdData);
-      signalSeriesRef.current.setData(signalData);
-      histSeriesRef.current.setData(histData);
+      macdSeriesRef.current.setData(deduplicatedMacdData);
+      signalSeriesRef.current.setData(deduplicatedSignalData);
+      histSeriesRef.current.setData(deduplicatedHistData);
 
       // Set MACD pane height
       const panes = chartRef.current.panes();
@@ -578,7 +957,7 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
           </button>
         </div>
         {/* Time Period Buttons */}
-        <div className="flex items-center gap-2 px-4 pb-3">
+        <div className="flex items-center gap-2 px-4 pb-2">
           {(['1d', '5d', '30d', '6mo', '12mo'] as TimePeriod[]).map((period) => (
             <button
               key={period}
@@ -596,6 +975,61 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
               {period}
             </button>
           ))}
+        </div>
+        
+        {/* Technical Indicator Toggles */}
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3 border-t border-gray-800 pt-2">
+          <span className="text-xs text-gray-500 mr-2">Indicators:</span>
+          <button
+            onClick={() => setShowSMA20(!showSMA20)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              showSMA20
+                ? 'bg-amber-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            SMA 20
+          </button>
+          <button
+            onClick={() => setShowSMA50(!showSMA50)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              showSMA50
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            SMA 50
+          </button>
+          <button
+            onClick={() => setShowSMA200(!showSMA200)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              showSMA200
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            SMA 200
+          </button>
+          <button
+            onClick={() => setShowBollinger(!showBollinger)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              showBollinger
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            Bollinger
+          </button>
+          <button
+            onClick={() => setShowRSI(!showRSI)}
+            className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+              showRSI
+                ? 'bg-pink-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            RSI
+          </button>
         </div>
       </div>
 

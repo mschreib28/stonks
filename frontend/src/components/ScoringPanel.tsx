@@ -16,6 +16,7 @@ interface ScoringPanelProps {
   onMaxPriceChange: (price: number | undefined) => void;
   onScore: () => void;
   scoring: boolean;
+  onDatasetChange?: (dataset: string) => void; // Optional callback to change dataset
 }
 
 const AVAILABLE_METRICS = [
@@ -50,6 +51,64 @@ const AVAILABLE_METRICS = [
 
 const PRESET_STORAGE_KEY = 'stonks_scoring_presets';
 
+// Built-in "Swing Trading Default" preset
+const SWING_TRADING_DEFAULT_PRESET: ScoringPreset = {
+  id: 'builtin_swing_trading_default',
+  name: 'Swing Trading Default',
+  description: 'Optimized for swing trading: 10k share trades, $0.20-$0.60 daily range, good liquidity, $1-8 price range',
+  criteria: [
+    {
+      name: 'tradability_score',
+      weight: 3.0,
+      min_value: 0,
+      max_value: 100,
+      invert: false,
+    },
+    {
+      name: 'avg_daily_range_dollars',
+      weight: 2.5,
+      min_value: 0.10,
+      max_value: 1.00,
+      invert: false,
+    },
+    {
+      name: 'liquidity_multiple',
+      weight: 2.0,
+      min_value: 0,
+      max_value: 100,
+      invert: false,
+    },
+    {
+      name: 'sweet_spot_range_pct',
+      weight: 1.5,
+      min_value: 0,
+      max_value: 100,
+      invert: false,
+    },
+    {
+      name: 'daily_range_cv',
+      weight: 1.0,
+      min_value: 0,
+      max_value: 1.0,
+      invert: true, // Lower CV = more consistent = better
+    },
+    {
+      name: 'current_price',
+      weight: 10.0,
+      min_value: 0,
+      max_value: 8,
+      invert: false,
+    },
+  ],
+  monthsBack: 12,
+  minDays: 60,
+  minAvgVolume: 750000,
+  minPrice: undefined,
+  maxPrice: undefined,
+  dataset: 'filtered', // Use the filtered dataset by default
+  createdAt: '2025-01-01T00:00:00.000Z',
+};
+
 export default function ScoringPanel({
   criteria,
   monthsBack,
@@ -65,6 +124,7 @@ export default function ScoringPanel({
   onMaxPriceChange,
   onScore,
   scoring,
+  onDatasetChange,
 }: ScoringPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [presets, setPresets] = useState<ScoringPreset[]>([]);
@@ -168,15 +228,20 @@ export default function ScoringPanel({
     return AVAILABLE_METRICS.find(m => m.name === name)?.label || name;
   };
 
-  // Load presets from localStorage
+  // Load presets from localStorage and include built-in preset
   useEffect(() => {
     try {
       const stored = localStorage.getItem(PRESET_STORAGE_KEY);
-      if (stored) {
-        setPresets(JSON.parse(stored));
-      }
+      const userPresets: ScoringPreset[] = stored ? JSON.parse(stored) : [];
+      
+      // Merge built-in preset with user presets (built-in first, then user presets)
+      // If user has a preset with the same ID, it will override the built-in one
+      const allPresets = [SWING_TRADING_DEFAULT_PRESET, ...userPresets];
+      setPresets(allPresets);
     } catch (error) {
       console.error('Failed to load presets:', error);
+      // Still show built-in preset even if loading fails
+      setPresets([SWING_TRADING_DEFAULT_PRESET]);
     }
   }, []);
 
@@ -232,7 +297,7 @@ export default function ScoringPanel({
     let updatedPresets: ScoringPreset[];
     
     if (saveMode === 'overwrite' && loadedPresetId) {
-      // Overwrite existing preset
+      // Overwrite existing preset (including built-in if it's the built-in ID)
       updatedPresets = presets.map(p => 
         p.id === loadedPresetId
           ? {
@@ -265,8 +330,10 @@ export default function ScoringPanel({
       updatedPresets = [...presets, newPreset];
     }
 
+    // Save only user presets to localStorage (exclude built-in)
+    const userPresets = updatedPresets.filter(p => p.id !== SWING_TRADING_DEFAULT_PRESET.id);
     setPresets(updatedPresets);
-    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(userPresets));
     
     // If saving as new, clear the loaded preset ID since we're now working with a new preset
     if (saveMode === 'new') {
@@ -287,15 +354,27 @@ export default function ScoringPanel({
     onMinAvgVolumeChange(preset.minAvgVolume);
     onMinPriceChange(preset.minPrice);
     onMaxPriceChange(preset.maxPrice);
+    // Change dataset if preset specifies one and callback is provided
+    if (preset.dataset && onDatasetChange) {
+      onDatasetChange(preset.dataset);
+    }
     setLoadedPresetId(preset.id);
     setShowPresetMenu(false);
   };
 
   const deletePreset = (id: string) => {
+    // Don't allow deleting the built-in preset
+    if (id === SWING_TRADING_DEFAULT_PRESET.id) {
+      alert('Cannot delete the built-in "Swing Trading Default" preset');
+      return;
+    }
+    
     if (confirm('Are you sure you want to delete this preset?')) {
       const updatedPresets = presets.filter(p => p.id !== id);
       setPresets(updatedPresets);
-      localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(updatedPresets));
+      // Save only user presets to localStorage (exclude built-in)
+      const userPresets = updatedPresets.filter(p => p.id !== SWING_TRADING_DEFAULT_PRESET.id);
+      localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(userPresets));
       if (loadedPresetId === id) {
         setLoadedPresetId(null);
       }
@@ -357,37 +436,49 @@ export default function ScoringPanel({
                   </button>
                   {showPresetMenu && presets.length > 0 && (
                     <div className="absolute top-full right-0 mt-1 z-50 bg-gray-800 dark:bg-gray-800 border border-gray-700 dark:border-gray-700 rounded-lg shadow-lg min-w-[300px] max-h-[400px] overflow-y-auto">
-                      {presets.map((preset) => (
-                        <div key={preset.id} className="p-3 border-b border-gray-700 dark:border-gray-700 last:border-b-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-white dark:text-white text-sm mb-1">
-                                {preset.name}
+                      {presets.map((preset) => {
+                        const isBuiltIn = preset.id === SWING_TRADING_DEFAULT_PRESET.id;
+                        return (
+                          <div key={preset.id} className="p-3 border-b border-gray-700 dark:border-gray-700 last:border-b-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <div className="font-medium text-white dark:text-white text-sm">
+                                    {preset.name}
+                                  </div>
+                                  {isBuiltIn && (
+                                    <span className="text-xs px-1.5 py-0.5 bg-blue-600 text-white rounded">
+                                      Built-in
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-400 dark:text-gray-400 mb-2">
+                                  {preset.description}
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-500">
+                                  {preset.criteria.length} criteria • {new Date(preset.createdAt).toLocaleDateString()}
+                                </div>
                               </div>
-                              <div className="text-xs text-gray-400 dark:text-gray-400 mb-2">
-                                {preset.description}
+                              <div className="flex flex-col gap-1 flex-shrink-0">
+                                <button
+                                  onClick={() => loadPreset(preset)}
+                                  className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                >
+                                  Load
+                                </button>
+                                {!isBuiltIn && (
+                                  <button
+                                    onClick={() => deletePreset(preset.id)}
+                                    className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
                               </div>
-                              <div className="text-xs text-gray-500 dark:text-gray-500">
-                                {preset.criteria.length} criteria • {new Date(preset.createdAt).toLocaleDateString()}
-                              </div>
-                            </div>
-                            <div className="flex flex-col gap-1 flex-shrink-0">
-                              <button
-                                onClick={() => loadPreset(preset)}
-                                className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
-                              >
-                                Load
-                              </button>
-                              <button
-                                onClick={() => deletePreset(preset.id)}
-                                className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
-                              >
-                                Delete
-                              </button>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

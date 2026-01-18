@@ -1,5 +1,10 @@
 import axios from 'axios';
-import type { Dataset, ColumnInfo, QueryRequest, QueryResponse, Stats, ScoringRequest, ScoringResponse } from './types';
+import type { 
+  Dataset, ColumnInfo, QueryRequest, QueryResponse, Stats, ScoringRequest, ScoringResponse,
+  FactorInfo, FactorEvaluationRequest, FactorEvaluationResponse,
+  BacktestRequest, BacktestResponse,
+  PerformanceAnalysisResponse,
+} from './types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -67,5 +72,33 @@ export const getUpdateStatus = async (): Promise<UpdateStatusResponse> => {
 
 export const triggerDataUpdate = async (): Promise<{ status: string; message: string }> => {
   const response = await api.post('/update-data');
+  return response.data;
+};
+
+// Factor Evaluation API
+export const getAvailableFactors = async (): Promise<{ factors: FactorInfo[] }> => {
+  const response = await api.get('/available-factors');
+  return response.data;
+};
+
+export const evaluateFactor = async (request: FactorEvaluationRequest): Promise<FactorEvaluationResponse> => {
+  const response = await api.post('/evaluate-factor', request);
+  return response.data;
+};
+
+// Backtest API
+export const runBacktest = async (request: BacktestRequest): Promise<BacktestResponse> => {
+  const response = await api.post('/backtest', request);
+  return response.data;
+};
+
+// Performance Analysis API
+export const analyzePerformance = async (ticker?: string, benchmark?: string): Promise<PerformanceAnalysisResponse> => {
+  const response = await api.post('/performance-analysis', { ticker, benchmark_ticker: benchmark });
+  return response.data;
+};
+
+export const getTickerPerformance = async (ticker: string): Promise<PerformanceAnalysisResponse> => {
+  const response = await api.get(`/ticker/${ticker}/performance`);
   return response.data;
 };
