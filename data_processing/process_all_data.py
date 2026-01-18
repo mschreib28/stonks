@@ -20,6 +20,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+try:
+    import polars as pl
+    HAS_POLARS = True
+except ImportError:
+    HAS_POLARS = False
+
 
 # Default paths - cache is shared across all years, raw data is partitioned by year
 CACHE_DIR = Path("data/cache")
@@ -55,6 +61,7 @@ FILTERED_OUTPUT = CACHE_DIR / "daily_filtered_1_9.99.parquet"
 MINUTE_FEATURES_OUTPUT = CACHE_DIR / "minute_features.parquet"
 MACD_INC_DIR = CACHE_DIR / "macd_day_features_inc" / "mode=all"
 MINUTE_MACD_OUTPUT = CACHE_DIR / "minute_features_plus_macd.parquet"
+TECHNICAL_FEATURES_OUTPUT = CACHE_DIR / "technical_features.parquet"
 
 
 def check_input_files(input_dir: Path, file_type: str) -> tuple[bool, int]:
@@ -76,6 +83,47 @@ def check_output_exists(output_path: Path) -> bool:
         parquet_files = list(output_path.rglob("*.parquet"))
         return len(parquet_files) > 0
     return output_path.exists()
+
+def get_latest_date_in_cache(cache_path: Path) -> str | None:
+    """Get the latest date from an existing cache file."""
+    if not cache_path.exists() or not HAS_POLARS:
+        return None
+    
+    try:
+        df = pl.scan_parquet(cache_path)
+        if "date" in df.columns:
+            max_date = df.select(pl.col("date").max()).collect()
+            if max_date.height > 0 and max_date[0, 0] is not None:
+                return str(max_date[0, 0])
+    except Exception:
+        pass
+    return None
+
+def get_latest_date_in_inputs(input_dirs: list[Path]) -> str | None:
+    """Get the latest date from input CSV files."""
+    latest_date = None
+    for input_dir in input_dirs:
+        for csv_file in input_dir.rglob("*.csv.gz"):
+            # Extract date from filename: YYYY-MM-DD.csv.gz
+            date_str = csv_file.stem.replace(".csv", "")
+            if len(date_str) == 10:  # YYYY-MM-DD format
+                if latest_date is None or date_str > latest_date:
+                    latest_date = date_str
+    return latest_date
+
+def needs_rebuild(cache_path: Path, input_dirs: list[Path]) -> bool:
+    """Check if cache needs to be rebuilt based on latest dates."""
+    cache_latest = get_latest_date_in_cache(cache_path)
+    input_latest = get_latest_date_in_inputs(input_dirs)
+    
+    if cache_latest is None:
+        return True  # No cache exists
+    
+    if input_latest is None:
+        return False  # No input files
+    
+    # Rebuild if input has newer dates
+    return input_latest > cache_latest
 
 
 def run_command(cmd: list[str], description: str, skip_if_exists: Optional[Path] = None) -> bool:
@@ -121,37 +169,38 @@ def process_daily_weekly(force: bool = False) -> bool:
     print(f"✓ Total: {total_count} daily CSV files\n")
     
     # Process daily/weekly - combine data from all year directories
-    # The build_polygon_cache.py script uses input_root/**/*.csv.gz glob
-    # We need to point it to a directory that contains all year subdirectories
-    # Since the structure is data/YYYY/polygon_day_aggs/MM/file.csv.gz,
-    # we can't use a single input-root. Instead, we'll need to process each year
-    # and combine, or use a workaround.
-    # For now, let's process the primary year (2025) and note that 2026 needs separate handling
-    # TODO: Update build_polygon_cache.py to accept multiple input roots or combine years
-    
-    # Use the first (oldest) year directory as primary, but note we should combine all
-    if not daily_inputs:
-        raise ValueError("No daily input directories found. Please download data first.")
-    primary_input = daily_inputs[0]
+    # The build_polygon_cache.py script uses input_root/**/*.csv.gz glob pattern
+    # By pointing to the parent 'data/' directory, the glob will find files in
+    # data/2025/polygon_day_aggs/**/*.csv.gz, data/2026/polygon_day_aggs/**/*.csv.gz, etc.
+    # Note: --prefilter-min-avg-volume and --prefilter-min-days now have defaults in build_polygon_cache.py
+    # matching the Swing Trading Default preset (750k volume, 60 days)
+    data_root = Path("data")
     cmd = [
         sys.executable,
         "data_processing/build_polygon_cache.py",
-        "--input-root", str(primary_input),
+        "--input-root", str(data_root),
         "--add-returns",
         "--build-weekly",
+        # Defaults are now in build_polygon_cache.py: min_avg_volume=750000, min_days=60
     ]
     
-    # If we have multiple years, warn that we need to combine them
     if len(daily_inputs) > 1:
-        print(f"⚠️  Note: Found data in {len(daily_inputs)} year directories.")
-        print(f"   Currently processing from: {primary_input}")
-        print(f"   To include all years, you may need to manually combine or update the processing script.")
+        print(f"✓ Processing data from {len(daily_inputs)} year directories: {[d.parent.name for d in daily_inputs]}")
     
     if not force:
-        # Check if outputs exist
-        if (check_output_exists(DAILY_OUTPUT) and 
-            check_output_exists(WEEKLY_OUTPUT) and 
-            check_output_exists(FILTERED_OUTPUT)):
+        # Check if we need to rebuild based on dates
+        cache_latest = get_latest_date_in_cache(DAILY_OUTPUT)
+        input_latest = get_latest_date_in_inputs(daily_inputs)
+        
+        if cache_latest and input_latest:
+            print(f"   Cache latest date: {cache_latest}")
+            print(f"   Input latest date: {input_latest}")
+            if input_latest <= cache_latest:
+                print(f"⏭️  Skipping daily/weekly processing (cache is up to date)")
+                return True
+            else:
+                print(f"🔄 Cache needs update (new data available)")
+        elif check_output_exists(DAILY_OUTPUT) and check_output_exists(WEEKLY_OUTPUT) and check_output_exists(FILTERED_OUTPUT):
             print(f"⏭️  Skipping daily/weekly processing (outputs already exist)")
             return True
     
@@ -183,19 +232,20 @@ def process_minute_features(force: bool = False) -> bool:
     print(f"✓ Found {daily_count} daily CSV files")
     print(f"✓ Found {minute_count} minute CSV files\n")
     
-    # Process minute features - use primary year for now
-    # TODO: Update to handle multiple years
-    primary_daily = daily_inputs[0]
-    primary_minute = minute_inputs[0]
-    
+    # Process minute features - combine data from all year directories
+    # Point to parent data/ directory so glob finds files from all years
+    data_root = Path("data")
     cmd = [
         sys.executable,
         "data_processing/build_polygon_cache.py",
-        "--input-root", str(primary_daily),
-        "--input-minute-root", str(primary_minute),
+        "--input-root", str(data_root),
+        "--input-minute-root", str(data_root),
         "--add-returns",
         "--build-minute-features",
     ]
+    
+    if len(daily_inputs) > 1 or len(minute_inputs) > 1:
+        print(f"✓ Processing minute features from {len(minute_inputs)} year directories: {[m.parent.name for m in minute_inputs]}")
     
     if not force and check_output_exists(MINUTE_FEATURES_OUTPUT):
         print(f"⏭️  Skipping minute features processing (output already exists)")
@@ -284,6 +334,35 @@ def join_macd_with_minute_features(force: bool = False) -> bool:
     return run_command(cmd, "Join MACD with Minute Features", skip_if_exists=MINUTE_MACD_OUTPUT if not force else None)
 
 
+def process_technical_features(force: bool = False) -> bool:
+    """Process technical indicator features from daily data."""
+    print("=" * 60)
+    print("Step 5: Processing Technical Indicator Features")
+    print("=" * 60)
+    
+    # Check prerequisite
+    if not check_output_exists(DAILY_OUTPUT):
+        print(f"⚠️  Error: Daily data not found: {DAILY_OUTPUT}")
+        print("   Please run daily processing first.")
+        return False
+    
+    print(f"✓ Daily data found: {DAILY_OUTPUT}\n")
+    
+    # Process technical features
+    cmd = [
+        sys.executable,
+        "data_processing/build_technical_features.py",
+        "--daily-path", str(DAILY_OUTPUT),
+        "--output", str(TECHNICAL_FEATURES_OUTPUT),
+    ]
+    
+    if not force and check_output_exists(TECHNICAL_FEATURES_OUTPUT):
+        print(f"⏭️  Skipping technical features (output already exists)")
+        return True
+    
+    return run_command(cmd, "Technical Indicator Features", skip_if_exists=TECHNICAL_FEATURES_OUTPUT if not force else None)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Load and process all data with recommended defaults",
@@ -297,7 +376,7 @@ Examples:
   python process_all_data.py --force
   
   # Process only specific steps
-  python process_all_data.py --steps daily minute
+  python process_all_data.py --steps daily minute technical
         """
     )
     parser.add_argument(
@@ -308,7 +387,7 @@ Examples:
     parser.add_argument(
         "--steps",
         nargs="+",
-        choices=["daily", "minute", "macd", "join"],
+        choices=["daily", "minute", "macd", "join", "technical"],
         help="Process only specific steps (default: all)",
     )
     parser.add_argument(
@@ -323,7 +402,7 @@ Examples:
     if args.steps:
         steps_to_run = set(args.steps)
     else:
-        steps_to_run = {"daily", "minute", "macd", "join"}
+        steps_to_run = {"daily", "minute", "macd", "join", "technical"}
     
     print("=" * 60)
     print("Stonks Data Processing Pipeline")
@@ -365,6 +444,13 @@ Examples:
         if not join_macd_with_minute_features(force=args.force):
             success = False
     
+    # Step 5: Technical Features
+    if "technical" in steps_to_run:
+        if not process_technical_features(force=args.force):
+            success = False
+            if not args.force:
+                print("⚠️  Technical features processing failed. Continuing with other steps...\n")
+    
     # Summary
     print("=" * 60)
     print("Processing Summary")
@@ -377,6 +463,7 @@ Examples:
         "Minute Features": MINUTE_FEATURES_OUTPUT,
         "MACD Features": MACD_INC_DIR,
         "Minute + MACD": MINUTE_MACD_OUTPUT,
+        "Technical Features": TECHNICAL_FEATURES_OUTPUT,
     }
     
     for name, path in outputs.items():

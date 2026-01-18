@@ -173,14 +173,68 @@ def add_computed_columns_weekly(lf: pl.LazyFrame) -> pl.LazyFrame:
     return lf.with_columns(computed)
 
 
-def build_prefiltered_dataset(daily_lf: pl.LazyFrame, price_min: float, price_max: float) -> pl.LazyFrame:
+def build_prefiltered_dataset(
+    daily_lf: pl.LazyFrame, 
+    price_min: float, 
+    price_max: float,
+    min_avg_volume: float | None = None,
+    min_days: int | None = None,
+) -> pl.LazyFrame:
     """
-    Filters daily data to stocks where close is within the specified price range.
-    Includes all computed columns.
+    Filters daily data to stocks that meet the specified criteria.
+    
+    Args:
+        daily_lf: LazyFrame of daily data
+        price_min: Minimum price filter
+        price_max: Maximum price filter
+        min_avg_volume: Optional minimum average daily volume (filters out tickers with low volume)
+        min_days: Optional minimum number of days of data required (filters out tickers with insufficient history)
+    
+    Returns:
+        Filtered LazyFrame with only tickers that meet all criteria
     """
-    return daily_lf.filter(
-        pl.col("close").is_between(price_min, price_max)
-    )
+    # If we need to filter by volume or days, calculate per-ticker statistics on ALL data first
+    # This ensures avg_volume is calculated across all days, not just price-filtered days
+    if min_avg_volume is not None or min_days is not None:
+        # Calculate per-ticker statistics on all data
+        ticker_stats = (
+            daily_lf
+            .group_by("ticker")
+            .agg([
+                pl.col("volume").mean().alias("avg_volume"),
+                pl.len().alias("day_count"),
+            ])
+        )
+        
+        # Build filter conditions
+        conditions = []
+        if min_avg_volume is not None:
+            conditions.append(pl.col("avg_volume") >= min_avg_volume)
+        if min_days is not None:
+            conditions.append(pl.col("day_count") >= min_days)
+        
+        # Filter tickers that meet criteria
+        if conditions:
+            ticker_filter = ticker_stats.filter(pl.all_horizontal(conditions))
+            valid_tickers = ticker_filter.select("ticker")
+            
+            # First filter by valid tickers, then by price range
+            filtered = daily_lf.join(valid_tickers, on="ticker", how="inner")
+            filtered = filtered.filter(
+                pl.col("close").is_between(price_min, price_max)
+            )
+        else:
+            # No volume/days filter, just filter by price
+            filtered = daily_lf.filter(
+                pl.col("close").is_between(price_min, price_max)
+            )
+    else:
+        # No volume/days filter, just filter by price
+        filtered = daily_lf.filter(
+            pl.col("close").is_between(price_min, price_max)
+        )
+    
+    return filtered
 
 
 def build_minute_lazy(input_glob: str) -> pl.LazyFrame:
@@ -507,6 +561,18 @@ def main() -> None:
         help="Output path for pre-filtered dataset",
     )
     parser.add_argument(
+        "--prefilter-min-avg-volume",
+        type=float,
+        default=750000,
+        help="Minimum average daily volume for pre-filtered dataset (default: 750000, matching Swing Trading Default preset). Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--prefilter-min-days",
+        type=int,
+        default=60,
+        help="Minimum number of days of data required for pre-filtered dataset (default: 60, matching Swing Trading Default preset). Use 0 to disable.",
+    )
+    parser.add_argument(
         "--input-minute-root",
         default="data/2025/polygon_minute_aggs",
         help="Folder containing month subfolders with minute *.csv.gz files",
@@ -552,28 +618,129 @@ def main() -> None:
         print(f"Wrote weekly cache to: {out_weekly} (partitioned={args.partitioned})")
 
     # Build pre-filtered dataset
+    # Convert 0 values to None to disable filters
+    min_avg_volume = args.prefilter_min_avg_volume if args.prefilter_min_avg_volume and args.prefilter_min_avg_volume > 0 else None
+    min_days = args.prefilter_min_days if args.prefilter_min_days and args.prefilter_min_days > 0 else None
+    
     prefiltered = build_prefiltered_dataset(
-        daily, price_min=args.prefilter_price_range[0], price_max=args.prefilter_price_range[1]
+        daily, 
+        price_min=args.prefilter_price_range[0], 
+        price_max=args.prefilter_price_range[1],
+        min_avg_volume=min_avg_volume,
+        min_days=min_days,
     )
     out_prefiltered = Path(args.out_prefiltered)
     write_parquet(prefiltered, out_prefiltered, partitioned=args.partitioned, compression=args.compression)
+    
+    # Print filter summary
+    filter_summary = [f"price ${args.prefilter_price_range[0]:.2f}-${args.prefilter_price_range[1]:.2f}"]
+    if min_avg_volume is not None:
+        filter_summary.append(f"min avg volume {min_avg_volume:,.0f}")
+    if min_days is not None:
+        filter_summary.append(f"min {min_days} days")
     print(f"Wrote pre-filtered cache to: {out_prefiltered} (partitioned={args.partitioned})")
+    print(f"  Filters: {', '.join(filter_summary)}")
 
     # Build minute features if requested
     if args.build_minute_features:
         minute_input_glob = str(Path(args.input_minute_root) / "**" / "*.csv.gz")
-        minute_lf = build_minute_lazy(minute_input_glob)
-        # Apply same price filter as pre-filtered dataset
-        minute_features = build_minute_features(
-            minute_lf, 
-            daily, 
-            vol_lookback_days=args.vol_spike_lookback,
-            price_min=args.prefilter_price_range[0],
-            price_max=args.prefilter_price_range[1]
-        )
         out_minute_features = Path(args.out_minute_features)
-        write_parquet(minute_features, out_minute_features, partitioned=args.partitioned, compression=args.compression)
-        print(f"Wrote minute features cache to: {out_minute_features} (partitioned={args.partitioned})")
+        
+        # Check if we should use batch processing for memory efficiency
+        # Process in date batches to reduce memory usage
+        use_batch_processing = True  # Always use batch processing for minute features
+        
+        if use_batch_processing:
+            print("Processing minute features in batches to reduce memory usage...")
+            minute_lf = build_minute_lazy(minute_input_glob)
+            
+            # Get unique dates from minute data using streaming to avoid loading all data
+            print("Scanning dates from minute data...")
+            dates_df = minute_lf.select("date").unique().sort("date").collect(streaming=True)
+            unique_dates = [str(row[0]) for row in dates_df.iter_rows()]
+            print(f"Found {len(unique_dates)} unique dates to process")
+            
+            # Process in smaller batches to keep memory manageable
+            batch_size = 10  # Reduced from 30 to process smaller chunks
+            batch_files = []
+            
+            # Create temporary directory for batch files
+            import tempfile
+            import shutil
+            temp_dir = Path(tempfile.mkdtemp(prefix="minute_features_batch_"))
+            try:
+                for i in range(0, len(unique_dates), batch_size):
+                    batch_dates = unique_dates[i:i+batch_size]
+                    batch_num = i//batch_size + 1
+                    total_batches = (len(unique_dates)-1)//batch_size + 1
+                    print(f"Processing batch {batch_num}/{total_batches}: {batch_dates[0]} to {batch_dates[-1]}")
+                    
+                    # Filter minute data to this batch of dates
+                    batch_minute_lf = minute_lf.filter(pl.col("date").is_in(batch_dates))
+                    
+                    # Process this batch
+                    batch_features = build_minute_features(
+                        batch_minute_lf,
+                        daily,
+                        vol_lookback_days=args.vol_spike_lookback,
+                        price_min=args.prefilter_price_range[0],
+                        price_max=args.prefilter_price_range[1]
+                    )
+                    
+                    # Collect using streaming engine and write to temp file immediately
+                    batch_df = batch_features.collect(streaming=True)
+                    
+                    if len(batch_df) > 0:
+                        # Add year/month columns if needed for partitioning
+                        if args.partitioned and "year" not in batch_df.columns:
+                            batch_df = batch_df.with_columns([
+                                pl.col("date").dt.year().alias("year"),
+                                pl.col("date").dt.month().alias("month"),
+                            ])
+                        
+                        # Write batch to temporary file
+                        batch_file = temp_dir / f"batch_{batch_num:04d}.parquet"
+                        batch_df.write_parquet(batch_file, compression=args.compression)
+                        batch_files.append(batch_file)
+                        print(f"  Wrote batch {batch_num} ({len(batch_df):,} rows) to temp file")
+                    
+                    # Clear intermediate data
+                    del batch_minute_lf, batch_features, batch_df
+                
+                # Combine all batch files using lazy concatenation
+                print(f"Combining {len(batch_files)} batches...")
+                if batch_files:
+                    # Read all batch files lazily and concatenate
+                    batch_lfs = [pl.scan_parquet(str(f)) for f in batch_files]
+                    combined_lf = pl.concat(batch_lfs)
+                    
+                    # Write final output
+                    write_parquet(
+                        combined_lf,
+                        out_minute_features,
+                        partitioned=args.partitioned,
+                        compression=args.compression
+                    )
+                    print(f"Wrote minute features cache to: {out_minute_features} (partitioned={args.partitioned})")
+                else:
+                    print("⚠️  No minute features generated")
+            finally:
+                # Clean up temporary files
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                    print("Cleaned up temporary batch files")
+        else:
+            # Original single-pass processing (uses more memory)
+            minute_lf = build_minute_lazy(minute_input_glob)
+            minute_features = build_minute_features(
+                minute_lf, 
+                daily, 
+                vol_lookback_days=args.vol_spike_lookback,
+                price_min=args.prefilter_price_range[0],
+                price_max=args.prefilter_price_range[1]
+            )
+            write_parquet(minute_features, out_minute_features, partitioned=args.partitioned, compression=args.compression)
+            print(f"Wrote minute features cache to: {out_minute_features} (partitioned={args.partitioned})")
 
 
 if __name__ == "__main__":
