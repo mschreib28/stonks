@@ -159,7 +159,7 @@ How volatility changes over time. Important for position sizing.
 ### Analyze Single Stock
 
 ```bash
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --data-path data/cache/daily_2025.parquet \
     --ticker AAPL \
     --benchmark SPY \
@@ -169,7 +169,7 @@ python data_processing/performance_analysis.py \
 ### Analyze Portfolio
 
 ```bash
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --data-path data/cache/daily_2025.parquet \
     --output data/cache/performance/portfolio_analysis.json
 ```

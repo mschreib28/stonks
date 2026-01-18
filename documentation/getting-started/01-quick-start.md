@@ -23,7 +23,7 @@ cd frontend && npm install
 **Option A: If you have Polygon S3 access:**
 ```bash
 # Download latest data from S3 and process it
-python data_processing/update_and_process_data.py
+uv run python data_processing/update_and_process_data.py
 ```
 
 **Option B: If you have local CSV files:**
@@ -47,7 +47,7 @@ Run the master pipeline script to build all caches:
 
 ```bash
 # Process all data (smart caching - skips existing outputs)
-python data_processing/process_all_data.py
+uv run python data_processing/process_all_data.py
 ```
 
 This will:
@@ -64,7 +64,7 @@ Open two terminal windows:
 
 **Terminal 1: Backend API**
 ```bash
-python api_server.py
+uv run python api_server.py
 ```
 
 **Terminal 2: Frontend**
@@ -123,22 +123,22 @@ Now that you have the system running:
 ### Train ML Models
 ```bash
 # Train a LightGBM classifier for direction prediction
-python data_processing/train_ml_model.py --model-type classifier
+uv run python data_processing/train_ml_model.py --model-type classifier
 
 # Or train a linear model with Ridge regularization
-python data_processing/train_ml_model.py --model-type linear --regularization ridge
+uv run python data_processing/train_ml_model.py --model-type linear --regularization ridge
 ```
 
 ### Evaluate Factors
 ```bash
 # Evaluate all technical indicators
-python data_processing/evaluate_factors.py --factor-column all
+uv run python data_processing/evaluate_factors.py --factor-column all
 ```
 
 ### Backtest Strategies
 ```bash
 # Test MACD crossover strategy
-python data_processing/backtest_vectorbt.py --strategy macd --ticker AAPL
+uv run python data_processing/backtest_vectorbt.py --strategy macd --ticker AAPL
 ```
 
 ### Learn More
@@ -151,7 +151,7 @@ python data_processing/backtest_vectorbt.py --strategy macd --ticker AAPL
 
 ### "No data found"
 - Check that data files exist in `data/YYYY/polygon_day_aggs/`
-- Run `python data_processing/process_all_data.py` to build caches
+- Run `uv run python data_processing/process_all_data.py` to build caches
 
 ### "API server not responding"
 - Check that `api_server.py` is running on port 8000
@@ -162,7 +162,7 @@ python data_processing/backtest_vectorbt.py --strategy macd --ticker AAPL
 - Check that the dev server is running on port 5173
 
 ### "Missing parquet files"
-- Run the pipeline: `python data_processing/process_all_data.py`
+- Run the pipeline: `uv run python data_processing/process_all_data.py`
 - Check output files exist in `data/cache/`
 
 ---

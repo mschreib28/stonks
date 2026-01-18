@@ -166,7 +166,7 @@ def evaluate_all_factors(
 ### Single Factor Evaluation
 
 ```bash
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-path data/cache/technical_features.parquet \
     --factor-column rsi_14 \
     --price-path data/cache/daily_2025.parquet \
@@ -177,7 +177,7 @@ python data_processing/evaluate_factors.py \
 ### All Factors
 
 ```bash
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column all \
     --output data/cache/factor_evaluation/
 ```
@@ -274,7 +274,7 @@ Horizon   IC
 ### Step 1: Evaluate All Available Factors
 
 ```bash
-python evaluate_factors.py --factor-column all --output results/
+uv run python data_processing/evaluate_factors.py --factor-column all --output results/
 ```
 
 ### Step 2: Identify Top Factors

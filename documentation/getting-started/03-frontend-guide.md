@@ -4,7 +4,7 @@ This guide walks you through the Stonks web interface and how to use each panel 
 
 ## Accessing the Frontend
 
-1. Start the backend: `python api_server.py`
+1. Start the backend: `uv run python api_server.py`
 2. Start the frontend: `cd frontend && npm run dev`
 3. Open http://localhost:5173
 

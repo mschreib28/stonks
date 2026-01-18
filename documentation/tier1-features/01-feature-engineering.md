@@ -207,7 +207,7 @@ Values: 0 or 1
 Use features to filter candidates:
 ```bash
 # Find oversold stocks in weak trends (mean reversion setup)
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column rsi_14 \
     --filter "rsi_14 < 30 AND adx_14 < 20"
 ```
@@ -217,7 +217,7 @@ python data_processing/evaluate_factors.py \
 Test which features predict returns:
 ```bash
 # Evaluate RSI predictive power
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column rsi_14 \
     --periods 1,5,10
 
@@ -233,7 +233,7 @@ python data_processing/evaluate_factors.py \
 
 Features feed into LightGBM for predictions:
 ```bash
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --data-path data/cache/technical_features.parquet \
     --model-type classifier
 ```
@@ -244,7 +244,7 @@ python data_processing/train_ml_model.py \
 
 Use binary signals with VectorBT:
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --oversold 30 \
     --overbought 70

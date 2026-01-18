@@ -9,7 +9,7 @@ Complete reference for all command-line tools in the Stonks project.
 Download and cache market data from Polygon.io.
 
 ```bash
-python data_processing/build_polygon_cache.py [OPTIONS]
+uv run python data_processing/build_polygon_cache.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -23,13 +23,13 @@ python data_processing/build_polygon_cache.py [OPTIONS]
 **Examples**:
 ```bash
 # Download 1 year of data for all tickers
-python data_processing/build_polygon_cache.py --days-back 365
+uv run python data_processing/build_polygon_cache.py --days-back 365
 
 # Update with just new data
-python data_processing/build_polygon_cache.py --incremental
+uv run python data_processing/build_polygon_cache.py --incremental
 
 # Download specific tickers
-python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
+uv run python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
 ```
 
 ---
@@ -39,7 +39,7 @@ python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
 Generate technical indicators from cached price data.
 
 ```bash
-python data_processing/build_technical_features.py [OPTIONS]
+uv run python data_processing/build_technical_features.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -51,10 +51,10 @@ python data_processing/build_technical_features.py [OPTIONS]
 **Examples**:
 ```bash
 # Build all features
-python data_processing/build_technical_features.py
+uv run python data_processing/build_technical_features.py
 
 # Build specific features only
-python data_processing/build_technical_features.py --features rsi_14,atr_14,bb_pct
+uv run python data_processing/build_technical_features.py --features rsi_14,atr_14,bb_pct
 ```
 
 **Generated Features**:
@@ -77,7 +77,7 @@ python data_processing/build_technical_features.py --features rsi_14,atr_14,bb_p
 Train LightGBM models for return prediction.
 
 ```bash
-python data_processing/train_ml_model.py [OPTIONS]
+uv run python data_processing/train_ml_model.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -94,17 +94,17 @@ python data_processing/train_ml_model.py [OPTIONS]
 **Examples**:
 ```bash
 # Train classifier for direction prediction
-python data_processing/train_ml_model.py --model-type classifier
+uv run python data_processing/train_ml_model.py --model-type classifier
 
 # Train regressor with custom parameters
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type regressor \
     --num-leaves 15 \
     --learning-rate 0.03 \
     --n-estimators 200
 
 # Train with more CV folds
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type classifier \
     --n-splits 10 \
     --test-size 30
@@ -119,7 +119,7 @@ python data_processing/train_ml_model.py \
 Compute Information Coefficient and quantile returns for factors.
 
 ```bash
-python data_processing/evaluate_factors.py [OPTIONS]
+uv run python data_processing/evaluate_factors.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -136,17 +136,17 @@ python data_processing/evaluate_factors.py [OPTIONS]
 **Examples**:
 ```bash
 # Evaluate single factor
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column rsi_14 \
     --periods 1,5,10
 
 # Evaluate all factors
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column all \
     --output data/cache/factor_evaluation/
 
 # Evaluate on specific date range
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column momentum \
     --start-date 2025-01-01 \
     --end-date 2025-06-30
@@ -175,7 +175,7 @@ Spread: -0.60%
 Run strategy backtests using VectorBT.
 
 ```bash
-python data_processing/backtest_vectorbt.py [OPTIONS]
+uv run python data_processing/backtest_vectorbt.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -205,13 +205,13 @@ python data_processing/backtest_vectorbt.py [OPTIONS]
 **Examples**:
 ```bash
 # MACD backtest on single ticker
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy macd \
     --ticker AAPL \
     --output results/aapl_macd.json
 
 # RSI backtest with custom parameters
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --ticker MSFT \
     --rsi-period 14 \
@@ -219,7 +219,7 @@ python data_processing/backtest_vectorbt.py \
     --overbought 75
 
 # MACD with custom periods and higher slippage
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy macd \
     --fast-period 8 \
     --slow-period 21 \
@@ -227,7 +227,7 @@ python data_processing/backtest_vectorbt.py \
     --slippage 0.005  # 0.5% for small-caps
 
 # Backtest on all tickers
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --ticker ALL \
     --output results/portfolio_rsi.json
@@ -262,7 +262,7 @@ Trades:
 Compute comprehensive performance metrics.
 
 ```bash
-python data_processing/performance_analysis.py [OPTIONS]
+uv run python data_processing/performance_analysis.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -277,17 +277,17 @@ python data_processing/performance_analysis.py [OPTIONS]
 **Examples**:
 ```bash
 # Analyze single stock
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --ticker AAPL \
     --benchmark SPY \
     --output results/aapl_performance.json
 
 # Analyze all stocks (portfolio)
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --output results/portfolio_performance.json
 
 # Analyze specific date range
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --ticker TSLA \
     --start-date 2024-01-01 \
     --end-date 2024-12-31
@@ -338,7 +338,7 @@ Benchmark Comparison (SPY):
 Start the FastAPI backend server.
 
 ```bash
-python api_server.py [OPTIONS]
+uv run python api_server.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -350,13 +350,13 @@ python api_server.py [OPTIONS]
 **Examples**:
 ```bash
 # Start production server
-python api_server.py
+uv run python api_server.py
 
 # Start development server with reload
-python api_server.py --reload
+uv run python api_server.py --reload
 
 # Start on different port
-python api_server.py --port 8080
+uv run python api_server.py --port 8080
 ```
 
 ---
@@ -367,15 +367,15 @@ python api_server.py --port 8080
 
 ```bash
 # Update data and rebuild features
-python data_processing/build_polygon_cache.py --incremental && \
-python data_processing/build_technical_features.py
+uv run python data_processing/build_polygon_cache.py --incremental && \
+uv run python data_processing/build_technical_features.py
 ```
 
 ### Weekly Factor Review
 
 ```bash
 # Evaluate all factors and save results
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column all \
     --output data/cache/factor_evaluation/weekly_$(date +%Y%m%d)/
 ```
@@ -384,12 +384,12 @@ python data_processing/evaluate_factors.py \
 
 ```bash
 # Test both strategies on all tickers
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy macd \
     --ticker ALL \
     --output results/macd_all.json
 
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --ticker ALL \
     --output results/rsi_all.json
@@ -399,7 +399,7 @@ python data_processing/backtest_vectorbt.py \
 
 ```bash
 # Retrain classifier with latest data
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type classifier \
     --output-dir data/cache/models/$(date +%Y%m%d)/
 ```
@@ -444,19 +444,19 @@ source .venv/bin/activate  # or uv sync
 ls -la data/cache/
 
 # Rebuild cache if needed
-python data_processing/build_polygon_cache.py --force-refresh
+uv run python data_processing/build_polygon_cache.py --force-refresh
 ```
 
 **"API rate limit"**:
 ```bash
 # Polygon has rate limits; wait and retry
-sleep 60 && python data_processing/build_polygon_cache.py --incremental
+sleep 60 && uv run python data_processing/build_polygon_cache.py --incremental
 ```
 
 **"Out of memory"**:
 ```bash
 # Process fewer tickers at once
-python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
+uv run python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
 ```
 
 ---
@@ -465,9 +465,9 @@ python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
 
 ```bash
 # Most scripts support --help
-python data_processing/build_polygon_cache.py --help
-python data_processing/train_ml_model.py --help
-python data_processing/backtest_vectorbt.py --help
+uv run python data_processing/build_polygon_cache.py --help
+uv run python data_processing/train_ml_model.py --help
+uv run python data_processing/backtest_vectorbt.py --help
 ```
 
 ---

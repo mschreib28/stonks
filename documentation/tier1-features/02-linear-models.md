@@ -353,18 +353,18 @@ exp(coefficient) = odds ratio
 
 ```bash
 # Linear regression baseline
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type linear \
     --output data/cache/models/linear_model.json
 
 # Ridge with tuning
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type linear \
     --regularization ridge \
     --tune-alpha
 
 # Logistic for direction
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type logistic \
     --target direction
 ```

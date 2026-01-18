@@ -26,17 +26,17 @@ Before market open, refresh your data.
 
 ```bash
 # Update with yesterday's data
-python data_processing/build_polygon_cache.py --incremental
+uv run python data_processing/build_polygon_cache.py --incremental
 
 # Rebuild technical features
-python data_processing/build_technical_features.py
+uv run python data_processing/build_technical_features.py
 ```
 
 ### Verify Data Freshness
 
 Check that data includes the most recent trading day:
 ```bash
-python -c "
+uv run python -c "
 import polars as pl
 df = pl.read_parquet('data/cache/daily_2025.parquet')
 print('Latest date:', df['date'].max())
@@ -49,7 +49,7 @@ print('Total tickers:', df['ticker'].n_unique())
 ### Terminal 1: Backend
 
 ```bash
-python api_server.py
+uv run python api_server.py
 ```
 
 Wait for: `Uvicorn running on http://0.0.0.0:8000`
@@ -204,7 +204,7 @@ If you prefer CLI over the web interface:
 
 ```bash
 # Output top 20 stocks to terminal
-python -c "
+uv run python -c "
 from api_server import score_stocks
 results = score_stocks(months_back=6, min_days=20)
 for r in results[:20]:
@@ -215,7 +215,7 @@ for r in results[:20]:
 ### Export to CSV
 
 ```bash
-python -c "
+uv run python -c "
 import json
 from api_server import score_stocks
 results = score_stocks(months_back=6, min_days=20)

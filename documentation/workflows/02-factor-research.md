@@ -81,7 +81,7 @@ df['volume_surge'] = compute_volume_surge(df)
 ### Rebuild Features
 
 ```bash
-python data_processing/build_technical_features.py
+uv run python data_processing/build_technical_features.py
 ```
 
 ### Verify Calculation
@@ -102,7 +102,7 @@ Check for:
 ### Run Factor Evaluation
 
 ```bash
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column volume_surge \
     --periods 1 5 10 \
     --quantiles 5 \
@@ -157,7 +157,7 @@ out_of_sample = df.filter(pl.col('date') >= split_date)
 
 ```bash
 # Evaluate only on recent data
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column volume_surge \
     --start-date 2025-07-01 \
     --end-date 2025-12-31
@@ -184,13 +184,13 @@ Test across different market regimes:
 
 ```bash
 # Bull market period
-python evaluate_factors.py --start-date 2024-01-01 --end-date 2024-06-30
+uv run python data_processing/evaluate_factors.py --start-date 2024-01-01 --end-date 2024-06-30
 
 # Correction period  
-python evaluate_factors.py --start-date 2024-07-01 --end-date 2024-09-30
+uv run python data_processing/evaluate_factors.py --start-date 2024-07-01 --end-date 2024-09-30
 
 # Recovery period
-python evaluate_factors.py --start-date 2024-10-01 --end-date 2024-12-31
+uv run python data_processing/evaluate_factors.py --start-date 2024-10-01 --end-date 2024-12-31
 ```
 
 ### Sector Analysis

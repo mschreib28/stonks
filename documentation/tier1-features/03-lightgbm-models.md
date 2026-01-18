@@ -127,7 +127,7 @@ params = {
 ### Train Classifier
 
 ```bash
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --data-path data/cache/technical_features.parquet \
     --model-type classifier \
     --n-splits 5 \
@@ -137,7 +137,7 @@ python data_processing/train_ml_model.py \
 ### Train Regressor
 
 ```bash
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type regressor \
     --n-splits 5
 ```
@@ -145,7 +145,7 @@ python data_processing/train_ml_model.py \
 ### Custom Parameters
 
 ```bash
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type classifier \
     --num-leaves 15 \
     --learning-rate 0.03 \

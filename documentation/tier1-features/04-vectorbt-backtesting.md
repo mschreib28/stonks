@@ -116,7 +116,7 @@ def walk_forward_optimization(
 ### Basic MACD Backtest
 
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --data-path data/cache/daily_2025.parquet \
     --strategy macd \
     --ticker AAPL \
@@ -126,7 +126,7 @@ python data_processing/backtest_vectorbt.py \
 ### RSI Backtest with Custom Parameters
 
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --ticker MSFT \
     --rsi-period 14 \
@@ -137,7 +137,7 @@ python data_processing/backtest_vectorbt.py \
 ### MACD with Custom Periods
 
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy macd \
     --fast-period 8 \
     --slow-period 21 \
@@ -147,7 +147,7 @@ python data_processing/backtest_vectorbt.py \
 ### Multi-Ticker Backtest
 
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy macd \
     --ticker ALL \
     --output data/cache/portfolio_backtest.json
@@ -293,8 +293,8 @@ If your OOS Sharpe is:
 
 ```bash
 # Run both strategies on same data
-python backtest_vectorbt.py --strategy macd --ticker XYZ --output macd.json
-python backtest_vectorbt.py --strategy rsi --ticker XYZ --output rsi.json
+uv run python data_processing/backtest_vectorbt.py --strategy macd --ticker XYZ --output macd.json
+uv run python data_processing/backtest_vectorbt.py --strategy rsi --ticker XYZ --output rsi.json
 ```
 
 ### Comparison Framework

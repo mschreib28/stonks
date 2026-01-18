@@ -96,7 +96,7 @@ def generate_signals(df):
 ### Run Backtest
 
 ```bash
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy custom \
     --signal-module my_strategy \
     --initial-cash 100000 \

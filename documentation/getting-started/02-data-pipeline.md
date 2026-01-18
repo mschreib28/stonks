@@ -54,13 +54,13 @@ For most users, run the master orchestration script:
 
 ```bash
 # Process all data with smart caching (skips existing outputs)
-python data_processing/process_all_data.py
+uv run python data_processing/process_all_data.py
 
 # Force full reprocessing
-python data_processing/process_all_data.py --force
+uv run python data_processing/process_all_data.py --force
 
 # Process specific steps only
-python data_processing/process_all_data.py --steps daily technical
+uv run python data_processing/process_all_data.py --steps daily technical
 ```
 
 This runs Stage 1 and Stage 2 automatically. Continue to Stage 4 for model training.
@@ -75,16 +75,16 @@ Downloads daily and minute data from Polygon's S3 bucket and triggers processing
 
 ```bash
 # Download latest data and process
-python data_processing/update_and_process_data.py
+uv run python data_processing/update_and_process_data.py
 
 # Download only (don't process)
-python data_processing/update_and_process_data.py --no-process
+uv run python data_processing/update_and_process_data.py --no-process
 
 # Download specific year
-python data_processing/update_and_process_data.py --year 2025
+uv run python data_processing/update_and_process_data.py --year 2025
 
 # Skip minute data (faster)
-python data_processing/update_and_process_data.py --skip-minute
+uv run python data_processing/update_and_process_data.py --skip-minute
 ```
 
 **Prerequisites:**
@@ -101,13 +101,13 @@ Converts raw CSV files to efficient Parquet format with filtering and feature co
 
 ```bash
 # Build daily and weekly caches with returns
-python data_processing/build_polygon_cache.py \
+uv run python data_processing/build_polygon_cache.py \
     --input-root data \
     --add-returns \
     --build-weekly
 
 # Build minute features (requires minute data)
-python data_processing/build_polygon_cache.py \
+uv run python data_processing/build_polygon_cache.py \
     --input-root data \
     --input-minute-root data \
     --build-minute-features
@@ -138,7 +138,7 @@ python data_processing/build_polygon_cache.py \
 Computes technical indicators from daily OHLCV data.
 
 ```bash
-python data_processing/build_technical_features.py \
+uv run python data_processing/build_technical_features.py \
     --daily-path data/cache/daily_2025.parquet \
     --output data/cache/technical_features.parquet
 ```
@@ -162,7 +162,7 @@ python data_processing/build_technical_features.py \
 Computes MACD features incrementally per day. More memory-efficient than the batch version.
 
 ```bash
-python data_processing/build_macd_day_features_incremental.py \
+uv run python data_processing/build_macd_day_features_incremental.py \
     --input-root data/2025/polygon_minute_aggs \
     --out-root data/cache/macd_day_features_inc \
     --mode all  # or 'rth' for regular trading hours only
@@ -183,7 +183,7 @@ python data_processing/build_macd_day_features_incremental.py \
 Alternative batch version of MACD feature computation. Loads all data at once.
 
 ```bash
-python data_processing/build_macd_cache.py \
+uv run python data_processing/build_macd_cache.py \
     --input-root data/2025/polygon_minute_aggs \
     --out-root data/cache/macd_day_features \
     --write-bar-level  # Optional: also write bar-level data (large)
@@ -198,7 +198,7 @@ python data_processing/build_macd_cache.py \
 Joins minute features with MACD day features.
 
 ```bash
-python data_processing/join_macd_with_volitility_dataset.py
+uv run python data_processing/join_macd_with_volitility_dataset.py
 ```
 
 **Inputs:**
@@ -216,7 +216,7 @@ python data_processing/join_macd_with_volitility_dataset.py
 Creates labeled events from MACD histogram crosses for supervised learning.
 
 ```bash
-python data_processing/build_event_labels.py \
+uv run python data_processing/build_event_labels.py \
     --input-root data/2025/polygon_minute_aggs \
     --out-root data/cache/training \
     --target-move 0.008 \
@@ -241,7 +241,7 @@ python data_processing/build_event_labels.py \
 Creates labels based on next-day range expansion.
 
 ```bash
-python data_processing/build_range_expansion_labels.py \
+uv run python data_processing/build_range_expansion_labels.py \
     --input data/cache/daily_2025.parquet \
     --output data/cache/range_expansion_labels.parquet \
     --threshold 0.08  # 8% range expansion
@@ -256,7 +256,7 @@ python data_processing/build_range_expansion_labels.py \
 Combines event labels with MACD and volatility features for model training.
 
 ```bash
-python data_processing/build_training_dataset.py \
+uv run python data_processing/build_training_dataset.py \
     --events-glob "data/cache/training/events_*.parquet" \
     --macd-glob "data/cache/macd_day_features_inc/mode=all/*.parquet" \
     --vol-path data/cache/minute_features.parquet \
@@ -276,29 +276,29 @@ Trains ML models using time-series cross-validation.
 
 ```bash
 # LightGBM classifier (direction prediction)
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --data-path data/cache/technical_features.parquet \
     --model-type classifier \
     --output-dir data/cache/models
 
 # LightGBM regressor (return magnitude)
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type regressor
 
 # Linear regression with Ridge regularization
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type linear \
     --regularization ridge \
     --tune-alpha
 
 # Lasso for feature selection
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type linear \
     --regularization lasso \
     --alpha 0.01
 
 # Logistic regression for direction
-python data_processing/train_ml_model.py \
+uv run python data_processing/train_ml_model.py \
     --model-type logistic \
     --regularization l2
 ```
@@ -325,13 +325,13 @@ Evaluates predictive power of features using Information Coefficient.
 
 ```bash
 # Evaluate single factor
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-path data/cache/technical_features.parquet \
     --factor-column rsi_14 \
     --price-path data/cache/daily_2025.parquet
 
 # Evaluate all factors
-python data_processing/evaluate_factors.py \
+uv run python data_processing/evaluate_factors.py \
     --factor-column all \
     --output data/cache/factor_evaluation
 ```
@@ -349,18 +349,18 @@ Computes beta, alpha, and factor exposures.
 
 ```bash
 # CAPM analysis
-python data_processing/factor_models.py \
+uv run python data_processing/factor_models.py \
     --ticker AAPL \
     --analysis capm
 
 # Fama-French 5-factor model
-python data_processing/factor_models.py \
+uv run python data_processing/factor_models.py \
     --ticker AAPL \
     --analysis ff \
     --model 5-factor
 
 # Compare all models
-python data_processing/factor_models.py \
+uv run python data_processing/factor_models.py \
     --ticker AAPL \
     --analysis compare
 ```
@@ -373,13 +373,13 @@ Backtests trading strategies using VectorBT.
 
 ```bash
 # MACD crossover strategy
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --data-path data/cache/daily_2025.parquet \
     --strategy macd \
     --ticker AAPL
 
 # RSI mean reversion
-python data_processing/backtest_vectorbt.py \
+uv run python data_processing/backtest_vectorbt.py \
     --strategy rsi \
     --rsi-period 14 \
     --oversold 30 \
@@ -400,13 +400,13 @@ Comprehensive strategy/portfolio performance analysis.
 
 ```bash
 # Single ticker analysis
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --data-path data/cache/daily_2025.parquet \
     --ticker AAPL \
     --benchmark SPY
 
 # Portfolio analysis (equal weight all tickers)
-python data_processing/performance_analysis.py \
+uv run python data_processing/performance_analysis.py \
     --data-path data/cache/daily_2025.parquet
 ```
 
@@ -425,9 +425,9 @@ python data_processing/performance_analysis.py \
 Runs the complete pipeline with smart caching.
 
 ```bash
-python data_processing/process_all_data.py
-python data_processing/process_all_data.py --force  # Rebuild everything
-python data_processing/process_all_data.py --steps daily minute macd
+uv run python data_processing/process_all_data.py
+uv run python data_processing/process_all_data.py --force  # Rebuild everything
+uv run python data_processing/process_all_data.py --steps daily minute macd
 ```
 
 ---
@@ -437,7 +437,7 @@ python data_processing/process_all_data.py --steps daily minute macd
 Compares local files against expected S3 listing.
 
 ```bash
-python data_processing/check_missing.py
+uv run python data_processing/check_missing.py
 ```
 
 **Requires:** `data/files_list.txt` with S3 listing
@@ -450,13 +450,13 @@ Removes warrants, units, rights, preferred shares, etc.
 
 ```bash
 # Preview what would be removed
-python data_processing/clean_non_tradable_tickers.py --dry-run
+uv run python data_processing/clean_non_tradable_tickers.py --dry-run
 
 # Actually clean
-python data_processing/clean_non_tradable_tickers.py
+uv run python data_processing/clean_non_tradable_tickers.py
 
 # Clean specific file
-python data_processing/clean_non_tradable_tickers.py --file daily_2025.parquet
+uv run python data_processing/clean_non_tradable_tickers.py --file daily_2025.parquet
 ```
 
 **Removes tickers matching:**
@@ -474,25 +474,25 @@ Here's the recommended sequence for building a trained dataset from scratch:
 
 ```bash
 # 1. Download latest data (if not already present)
-python data_processing/update_and_process_data.py --no-process
+uv run python data_processing/update_and_process_data.py --no-process
 
 # 2. Run the core pipeline (daily, minute, MACD, technical features)
-python data_processing/process_all_data.py
+uv run python data_processing/process_all_data.py
 
 # 3. (Optional) Build event labels for ML training
-python data_processing/build_event_labels.py
+uv run python data_processing/build_event_labels.py
 
 # 4. (Optional) Build training dataset
-python data_processing/build_training_dataset.py
+uv run python data_processing/build_training_dataset.py
 
 # 5. Train a model
-python data_processing/train_ml_model.py --model-type classifier
+uv run python data_processing/train_ml_model.py --model-type classifier
 
 # 6. Evaluate factor quality
-python data_processing/evaluate_factors.py --factor-column all
+uv run python data_processing/evaluate_factors.py --factor-column all
 
 # 7. Backtest a strategy
-python data_processing/backtest_vectorbt.py --strategy macd
+uv run python data_processing/backtest_vectorbt.py --strategy macd
 ```
 
 ---
