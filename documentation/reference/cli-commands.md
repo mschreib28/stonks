@@ -14,22 +14,26 @@ uv run python data_processing/build_polygon_cache.py [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--days-back` | 365 | Number of days of historical data |
-| `--incremental` | False | Only fetch new data since last run |
-| `--force-refresh` | False | Delete cache and re-download all data |
-| `--output-dir` | data/cache | Directory for parquet files |
-| `--tickers` | All | Comma-separated list of specific tickers |
+| `--input-root` | data/2025/polygon_day_aggs | Folder containing month subfolders with *.csv.gz files |
+| `--out-daily` | data/cache/daily_2025.parquet | Output Parquet path for daily data |
+| `--add-returns` | False | Add per-ticker daily returns column ret_d |
+| `--partitioned` | False | Write partitioned Parquet dataset |
+| `--build-weekly` | False | Also build weekly close-to-close returns |
+| `--build-minute-features` | False | Build minute-level feature cache |
 
 **Examples**:
 ```bash
-# Download 1 year of data for all tickers
-uv run python data_processing/build_polygon_cache.py --days-back 365
+# Process daily data with returns
+uv run python data_processing/build_polygon_cache.py --add-returns
 
-# Update with just new data
-uv run python data_processing/build_polygon_cache.py --incremental
+# Process with weekly aggregates
+uv run python data_processing/build_polygon_cache.py --add-returns --build-weekly
 
-# Download specific tickers
-uv run python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
+# Process minute features
+uv run python data_processing/build_polygon_cache.py --build-minute-features
+
+# For incremental updates, use process_all_data.py instead:
+uv run python data_processing/process_all_data.py
 ```
 
 ---
@@ -338,7 +342,7 @@ Benchmark Comparison (SPY):
 Start the FastAPI backend server.
 
 ```bash
-uv run python api_server.py [OPTIONS]
+uv run python backend/api_server.py [OPTIONS]
 ```
 
 | Option | Default | Description |
@@ -350,13 +354,13 @@ uv run python api_server.py [OPTIONS]
 **Examples**:
 ```bash
 # Start production server
-uv run python api_server.py
+uv run python backend/api_server.py
 
 # Start development server with reload
-uv run python api_server.py --reload
+uv run python backend/api_server.py --reload
 
 # Start on different port
-uv run python api_server.py --port 8080
+uv run python backend/api_server.py --port 8080
 ```
 
 ---
@@ -366,8 +370,11 @@ uv run python api_server.py --port 8080
 ### Morning Data Update
 
 ```bash
-# Update data and rebuild features
-uv run python data_processing/build_polygon_cache.py --incremental && \
+# Update data and rebuild features (incremental - checks dates automatically)
+uv run python data_processing/process_all_data.py
+
+# Or manually update specific components:
+uv run python data_processing/build_polygon_cache.py --add-returns && \
 uv run python data_processing/build_technical_features.py
 ```
 
@@ -443,20 +450,21 @@ source .venv/bin/activate  # or uv sync
 # Check if data files exist
 ls -la data/cache/
 
-# Rebuild cache if needed
-uv run python data_processing/build_polygon_cache.py --force-refresh
+# Rebuild cache if needed (use --force flag with process_all_data.py)
+uv run python data_processing/process_all_data.py --force
 ```
 
 **"API rate limit"**:
 ```bash
 # Polygon has rate limits; wait and retry
-sleep 60 && uv run python data_processing/build_polygon_cache.py --incremental
+sleep 60 && uv run python data_processing/process_all_data.py
 ```
 
 **"Out of memory"**:
 ```bash
-# Process fewer tickers at once
-uv run python data_processing/build_polygon_cache.py --tickers AAPL,MSFT,GOOGL
+# Process data in smaller batches by limiting input directories
+# Or use partitioned output to reduce memory usage
+uv run python data_processing/build_polygon_cache.py --partitioned
 ```
 
 ---
