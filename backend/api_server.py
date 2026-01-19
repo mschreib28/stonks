@@ -119,7 +119,7 @@ def load_dataset(dataset: str) -> pl.DataFrame:
     if dataset in _data_cache:
         return _data_cache[dataset]
     
-    cache_dir = Path("data/cache")
+    cache_dir = project_root / "data" / "cache"
     
     dataset_map = {
         "daily": "daily_2025.parquet",
@@ -228,7 +228,7 @@ def test_endpoint():
 def list_datasets():
     """List available datasets."""
     try:
-        cache_dir = Path("data/cache")
+        cache_dir = project_root / "data" / "cache"
         datasets = []
         
         for name, filename in [
@@ -664,13 +664,132 @@ def compute_ticker_metrics(df: pl.DataFrame, months_back: int = 12) -> Dict[str,
     return metrics
 
 
+# Default Swing Trading Default preset criteria (must match frontend)
+DEFAULT_CRITERIA_MATCH = {
+    "dataset": "filtered",
+    "months_back": 12,
+    "min_days": 60,
+    "min_avg_volume": 750000,
+    "min_price": None,
+    "max_price": None,
+    "criteria": [
+        {"name": "tradability_score", "weight": 3.0, "min_value": 0, "max_value": 100, "invert": False},
+        {"name": "avg_daily_range_dollars", "weight": 2.5, "min_value": 0.10, "max_value": 1.00, "invert": False},
+        {"name": "liquidity_multiple", "weight": 2.0, "min_value": 0, "max_value": 100, "invert": False},
+        {"name": "sweet_spot_range_pct", "weight": 1.5, "min_value": 0, "max_value": 100, "invert": False},
+        {"name": "daily_range_cv", "weight": 1.0, "min_value": 0, "max_value": 1.0, "invert": True},
+        {"name": "current_price", "weight": 10.0, "min_value": 0, "max_value": 8, "invert": False},
+    ],
+}
+
+
+def matches_default_criteria(request: ScoringRequest) -> bool:
+    """Check if request matches the default Swing Trading Default preset criteria."""
+    if request.dataset != DEFAULT_CRITERIA_MATCH["dataset"]:
+        return False
+    if request.months_back != DEFAULT_CRITERIA_MATCH["months_back"]:
+        return False
+    if request.min_days != DEFAULT_CRITERIA_MATCH["min_days"]:
+        return False
+    if request.min_avg_volume != DEFAULT_CRITERIA_MATCH["min_avg_volume"]:
+        return False
+    if request.min_price != DEFAULT_CRITERIA_MATCH["min_price"]:
+        return False
+    if request.max_price != DEFAULT_CRITERIA_MATCH["max_price"]:
+        return False
+    if request.filters:
+        return False  # No additional filters allowed
+    
+    # Check criteria match
+    if len(request.criteria) != len(DEFAULT_CRITERIA_MATCH["criteria"]):
+        return False
+    
+    # Sort criteria by name for comparison
+    request_criteria = sorted([(c.name, c.weight, c.min_value, c.max_value, c.invert) for c in request.criteria])
+    default_criteria = sorted([
+        (c["name"], c["weight"], c["min_value"], c["max_value"], c["invert"])
+        for c in DEFAULT_CRITERIA_MATCH["criteria"]
+    ])
+    
+    return request_criteria == default_criteria
+
+
+def load_scoring_index() -> pl.DataFrame | None:
+    """Load the precomputed scoring index if it exists."""
+    cache_dir = project_root / "data" / "cache"
+    index_path = cache_dir / "scoring_index_default.parquet"
+    
+    if not index_path.exists():
+        return None
+    
+    try:
+        return pl.read_parquet(index_path)
+    except Exception as e:
+        logger.warning(f"Failed to load scoring index: {e}")
+        return None
+
+
 @app.post("/api/score-tickers")
 def score_tickers(request: ScoringRequest):
     """
     Score and rank tickers based on configurable criteria.
     Computes time-series metrics for each ticker and applies weighted scoring.
+    Uses precomputed index if request matches default criteria.
     """
     try:
+        # Check if we can use the precomputed index
+        if matches_default_criteria(request):
+            index_df = load_scoring_index()
+            if index_df is not None:
+                logger.info("Using precomputed scoring index for default criteria")
+                
+                # Convert index to response format
+                scored_tickers = []
+                for row in index_df.iter_rows(named=True):
+                    ticker = row["ticker"]
+                    total_score = row["total_score"]
+                    
+                    # Build metrics dict from index row
+                    metrics = {}
+                    criterion_scores = {}
+                    
+                    # Extract all metric columns (exclude ticker, total_score, last_updated, and _score/_normalized columns)
+                    exclude_cols = {"ticker", "total_score", "last_updated"}
+                    for col, value in row.items():
+                        if col in exclude_cols:
+                            continue
+                        if col.endswith("_score") or col.endswith("_normalized"):
+                            # These are criterion score columns, skip for metrics
+                            continue
+                        metrics[col] = value
+                    
+                    # Extract criterion scores
+                    for criterion in request.criteria:
+                        score_col = f"{criterion.name}_score"
+                        norm_col = f"{criterion.name}_normalized"
+                        if score_col in row and norm_col in row:
+                            criterion_scores[criterion.name] = {
+                                "value": metrics.get(criterion.name),
+                                "normalized": row[norm_col],
+                                "score": row[score_col],
+                            }
+                    
+                    scored_tickers.append({
+                        "ticker": ticker,
+                        "total_score": total_score,
+                        "metrics": metrics,
+                        "criterion_scores": criterion_scores,
+                    })
+                
+                # Already sorted by score in index
+                return {
+                    "ranked_tickers": scored_tickers,
+                    "total": len(scored_tickers),
+                }
+            else:
+                logger.info("Scoring index not available, computing scores on the fly")
+        
+        # Fall back to computing scores on the fly
         df = load_dataset(request.dataset)
         
         # Get most recent prices for each ticker BEFORE applying filters
@@ -1076,6 +1195,125 @@ def trigger_data_update(background_tasks: BackgroundTasks):
         "status": "started",
         "message": "Data update started",
     }
+
+
+# ============================================
+# Factor Evaluation Endpoints
+# ============================================
+
+class FactorEvaluationRequest(BaseModel):
+    factor_column: str
+    periods: List[int] = [1, 5, 10]
+    quantiles: int = 5
+
+
+@app.post("/api/evaluate-factor")
+def evaluate_factor(request: FactorEvaluationRequest):
+    """
+    Evaluate a factor/signal using Information Coefficient analysis.
+    
+    Computes:
+    - IC (rank correlation with forward returns)
+    - Factor quantile returns
+    - Factor statistics
+    """
+    try:
+        # Check if technical features exist
+        tech_path = project_root / "data" / "cache" / "technical_features.parquet"
+        daily_path = project_root / "data" / "cache" / "daily_2025.parquet"
+        
+        if not tech_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Technical features not found. Run: python data_processing/build_technical_features.py"
+            )
+        
+        if not daily_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail="Daily data not found. Run data processing first."
+            )
+        
+        # Import evaluation module
+        from data_processing.evaluate_factors import load_factor_and_prices, compute_ic_simple, compute_factor_quantile_returns
+        
+        # Load data
+        factor, prices = load_factor_and_prices(
+            factor_path=str(tech_path),
+            factor_column=request.factor_column,
+            price_path=str(daily_path),
+        )
+        
+        # Compute IC
+        ic_results = compute_ic_simple(factor, prices, request.periods)
+        
+        # Compute quantile returns
+        quantile_returns = compute_factor_quantile_returns(
+            factor, prices, request.periods, request.quantiles
+        )
+        
+        # Format response
+        response = {
+            "factor": request.factor_column,
+            "ic_analysis": {},
+            "quantile_returns": {},
+        }
+        
+        for period_key, ic_data in ic_results.items():
+            response["ic_analysis"][period_key] = {
+                "mean_ic": ic_data["mean"],
+                "ic_std": ic_data["std"],
+                "t_stat": ic_data["t_stat"],
+                "positive_pct": ic_data["positive_pct"],
+            }
+        
+        for period_key, qr_data in quantile_returns.items():
+            response["quantile_returns"][period_key] = {
+                "returns_by_quantile": qr_data["mean_returns"],
+                "spread": qr_data["spread"],
+            }
+        
+        return response
+        
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error in evaluate_factor: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error evaluating factor: {str(e)}")
+
+
+@app.get("/api/available-factors")
+def get_available_factors():
+    """Get list of available factors for evaluation."""
+    try:
+        tech_path = project_root / "data" / "cache" / "technical_features.parquet"
+        
+        if not tech_path.exists():
+            return {"factors": [], "error": "Technical features not found"}
+        
+        # Load schema to get column names
+        lf = pl.scan_parquet(tech_path)
+        schema = lf.schema
+        
+        # Exclude non-factor columns
+        exclude_cols = {'ticker', 'date', 'year', 'month', 'open', 'high', 'low', 'close', 'volume'}
+        
+        factors = []
+        for col, dtype in schema.items():
+            if col not in exclude_cols and dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]:
+                factors.append({
+                    "name": col,
+                    "type": str(dtype),
+                })
+        
+        return {"factors": factors}
+        
+    except Exception as e:
+        logger.error(f"Error getting available factors: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
