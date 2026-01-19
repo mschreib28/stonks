@@ -2,14 +2,19 @@
 """
 Load and process all data with recommended defaults.
 
-This script:
-1. Checks if input CSV files exist (warns if missing)
-2. Processes daily/weekly aggregates
-3. Processes minute-level features
-4. Processes MACD features (incremental)
-5. Joins MACD with minute features
+This script runs incrementally by default - it only processes new data that
+hasn't been processed yet, based on date comparisons between input files and
+existing cache files.
 
-Skips processing if output files already exist.
+Processing steps:
+1. Processes daily/weekly aggregates (incremental - checks dates)
+2. Processes minute-level features (incremental - checks dates)
+3. Processes MACD features (incremental - skips existing dates)
+4. Joins MACD with minute features
+5. Processes technical indicator features (incremental - checks dates)
+6. Builds scoring index for default criteria (incremental - checks dates)
+
+Use --force to reprocess everything regardless of existing outputs.
 """
 
 from __future__ import annotations
@@ -62,6 +67,7 @@ MINUTE_FEATURES_OUTPUT = CACHE_DIR / "minute_features.parquet"
 MACD_INC_DIR = CACHE_DIR / "macd_day_features_inc" / "mode=all"
 MINUTE_MACD_OUTPUT = CACHE_DIR / "minute_features_plus_macd.parquet"
 TECHNICAL_FEATURES_OUTPUT = CACHE_DIR / "technical_features.parquet"
+SCORING_INDEX_OUTPUT = CACHE_DIR / "scoring_index_default.parquet"
 
 
 def check_input_files(input_dir: Path, file_type: str) -> tuple[bool, int]:
@@ -247,9 +253,22 @@ def process_minute_features(force: bool = False) -> bool:
     if len(daily_inputs) > 1 or len(minute_inputs) > 1:
         print(f"✓ Processing minute features from {len(minute_inputs)} year directories: {[m.parent.name for m in minute_inputs]}")
     
-    if not force and check_output_exists(MINUTE_FEATURES_OUTPUT):
-        print(f"⏭️  Skipping minute features processing (output already exists)")
-        return True
+    if not force:
+        # Check if we need to rebuild based on dates
+        cache_latest = get_latest_date_in_cache(MINUTE_FEATURES_OUTPUT)
+        input_latest = get_latest_date_in_inputs(minute_inputs)
+        
+        if cache_latest and input_latest:
+            print(f"   Cache latest date: {cache_latest}")
+            print(f"   Input latest date: {input_latest}")
+            if input_latest <= cache_latest:
+                print(f"⏭️  Skipping minute features processing (cache is up to date)")
+                return True
+            else:
+                print(f"🔄 Cache needs update (new data available)")
+        elif check_output_exists(MINUTE_FEATURES_OUTPUT):
+            print(f"⏭️  Skipping minute features processing (output already exists)")
+            return True
     
     return run_command(cmd, "Minute-Level Features", skip_if_exists=MINUTE_FEATURES_OUTPUT if not force else None)
 
@@ -356,11 +375,67 @@ def process_technical_features(force: bool = False) -> bool:
         "--output", str(TECHNICAL_FEATURES_OUTPUT),
     ]
     
-    if not force and check_output_exists(TECHNICAL_FEATURES_OUTPUT):
-        print(f"⏭️  Skipping technical features (output already exists)")
-        return True
+    if not force:
+        # Check if we need to rebuild based on dates
+        # Technical features depend on daily data, so check if daily data is newer
+        cache_latest = get_latest_date_in_cache(TECHNICAL_FEATURES_OUTPUT)
+        daily_latest = get_latest_date_in_cache(DAILY_OUTPUT)
+        
+        if cache_latest and daily_latest:
+            print(f"   Technical features cache latest date: {cache_latest}")
+            print(f"   Daily data latest date: {daily_latest}")
+            if daily_latest <= cache_latest:
+                print(f"⏭️  Skipping technical features processing (cache is up to date)")
+                return True
+            else:
+                print(f"🔄 Cache needs update (daily data has newer dates)")
+        elif check_output_exists(TECHNICAL_FEATURES_OUTPUT):
+            print(f"⏭️  Skipping technical features (output already exists)")
+            return True
     
     return run_command(cmd, "Technical Indicator Features", skip_if_exists=TECHNICAL_FEATURES_OUTPUT if not force else None)
+
+
+def build_scoring_index(force: bool = False) -> bool:
+    """Build precomputed scoring index using default criteria."""
+    print("=" * 60)
+    print("Step 6: Building Scoring Index")
+    print("=" * 60)
+    
+    # Check prerequisite
+    if not check_output_exists(FILTERED_OUTPUT):
+        print(f"⚠️  Error: Filtered dataset not found: {FILTERED_OUTPUT}")
+        print("   Please run daily processing first.")
+        return False
+    
+    print(f"✓ Filtered dataset found: {FILTERED_OUTPUT}\n")
+    
+    # Build scoring index
+    cmd = [
+        sys.executable,
+        "data_processing/build_scoring_index.py",
+        "--dataset", str(FILTERED_OUTPUT),
+        "--output", str(SCORING_INDEX_OUTPUT),
+    ]
+    
+    if not force:
+        # Check if we need to rebuild based on dates
+        cache_latest = get_latest_date_in_cache(SCORING_INDEX_OUTPUT)
+        filtered_latest = get_latest_date_in_cache(FILTERED_OUTPUT)
+        
+        if cache_latest and filtered_latest:
+            print(f"   Scoring index latest date: {cache_latest}")
+            print(f"   Filtered dataset latest date: {filtered_latest}")
+            if filtered_latest <= cache_latest:
+                print(f"⏭️  Skipping scoring index build (index is up to date)")
+                return True
+            else:
+                print(f"🔄 Index needs update (filtered dataset has newer dates)")
+        elif check_output_exists(SCORING_INDEX_OUTPUT):
+            print(f"⏭️  Skipping scoring index build (index already exists)")
+            return True
+    
+    return run_command(cmd, "Scoring Index", skip_if_exists=SCORING_INDEX_OUTPUT if not force else None)
 
 
 def main() -> None:
@@ -387,7 +462,7 @@ Examples:
     parser.add_argument(
         "--steps",
         nargs="+",
-        choices=["daily", "minute", "macd", "join", "technical"],
+        choices=["daily", "minute", "macd", "join", "technical", "scoring_index"],
         help="Process only specific steps (default: all)",
     )
     parser.add_argument(
@@ -402,7 +477,7 @@ Examples:
     if args.steps:
         steps_to_run = set(args.steps)
     else:
-        steps_to_run = {"daily", "minute", "macd", "join", "technical"}
+        steps_to_run = {"daily", "minute", "macd", "join", "technical", "scoring_index"}
     
     print("=" * 60)
     print("Stonks Data Processing Pipeline")
@@ -451,6 +526,13 @@ Examples:
             if not args.force:
                 print("⚠️  Technical features processing failed. Continuing with other steps...\n")
     
+    # Step 6: Scoring Index
+    if "scoring_index" in steps_to_run:
+        if not build_scoring_index(force=args.force):
+            success = False
+            if not args.force:
+                print("⚠️  Scoring index build failed. Continuing...\n")
+    
     # Summary
     print("=" * 60)
     print("Processing Summary")
@@ -464,6 +546,7 @@ Examples:
         "MACD Features": MACD_INC_DIR,
         "Minute + MACD": MINUTE_MACD_OUTPUT,
         "Technical Features": TECHNICAL_FEATURES_OUTPUT,
+        "Scoring Index": SCORING_INDEX_OUTPUT,
     }
     
     for name, path in outputs.items():
