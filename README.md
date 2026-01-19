@@ -7,12 +7,14 @@ A Python-based stock data processing pipeline with a React web interface for exp
 ## Features
 
 ### Data Processing
+
 - **Daily/Weekly Aggregates**: Process Polygon CSV files into efficient Parquet caches with computed returns and filtering columns
 - **Minute-Level Features**: Aggregate minute-by-minute data to ticker-day level features for fast screening
 - **MACD Indicators**: Compute MACD(12,26,9) on 1-minute and 5-minute timeframes
 - **Pre-filtered Datasets**: Pre-filter stocks by price range (default: $1-9.99) for faster analysis
 
 ### Web Interface
+
 - **Dynamic Filtering**: Filter by any column with range, boolean, or text filters
 - **Sortable Tables**: Click column headers to sort data
 - **Multiple Datasets**: Switch between daily, weekly, filtered, minute features, and MACD-enhanced datasets
@@ -22,6 +24,7 @@ A Python-based stock data processing pipeline with a React web interface for exp
 ## Setup
 
 ### Prerequisites
+
 - Python 3.13+
 - Node.js 18+ and npm
 - `uv` package manager (for Python dependencies)
@@ -29,11 +32,13 @@ A Python-based stock data processing pipeline with a React web interface for exp
 ### Python Backend Setup
 
 1. **Install dependencies using `uv`:**
+
 ```bash
 uv sync
 ```
 
-2. **Verify installation:**
+1. **Verify installation:**
+
 ```bash
 python --version  # Should be 3.13+
 uv --version
@@ -42,16 +47,19 @@ uv --version
 ### React Frontend Setup
 
 1. **Navigate to the frontend directory:**
+
 ```bash
 cd frontend
 ```
 
-2. **Install dependencies:**
+1. **Install dependencies:**
+
 ```bash
 npm install
 ```
 
-3. **Verify installation:**
+1. **Verify installation:**
+
 ```bash
 npm --version
 ```
@@ -89,6 +97,7 @@ Download Polygon data files and organize them in the structure above:
 2. **Minute aggregates**: Place in `data/2025/polygon_minute_aggs/MM/YYYY-MM-DD.csv.gz`
 
 **Expected CSV columns:**
+
 - `ticker` (or `symbol`)
 - `window_start` (or `timestamp` or `t`) - epoch milliseconds for daily, nanoseconds for minute
 - `open`, `high`, `low`, `close` (Float64)
@@ -105,6 +114,7 @@ python data_processing/process_all_data.py
 ```
 
 This script:
+
 - ✅ Checks if input CSV files exist
 - ✅ Skips processing if output files already exist
 - ✅ Processes all steps in order: daily/weekly → minute features → MACD → join
@@ -112,6 +122,7 @@ This script:
 - ✅ Provides clear status messages
 
 **Options:**
+
 ```bash
 # Force reprocess everything (ignore existing outputs)
 python data_processing/process_all_data.py --force
@@ -138,11 +149,13 @@ python data_processing/build_polygon_cache.py \
 ```
 
 **Output files:**
+
 - `data/2025/cache/daily_2025.parquet` - Daily data with returns and computed columns
 - `data/2025/cache/daily_filtered_1_9.99.parquet` - Pre-filtered $1-9.99 price range
 - `data/2025/cache/weekly.parquet` - Weekly aggregates
 
 **Options:**
+
 - `--add-returns`: Add daily return calculations (required for most features)
 - `--build-weekly`: Build weekly aggregates
 - `--prefilter-price-range MIN MAX`: Custom price range (default: 1.0 9.99)
@@ -162,9 +175,11 @@ python data_processing/build_polygon_cache.py \
 ```
 
 **Output file:**
+
 - `data/2025/cache/minute_features.parquet`
 
 **Features computed:**
+
 - `day_range_pct`: Intraday volatility `(high - low) / open`
 - `max_1m_ret`, `max_5m_ret`: Maximum 1-minute and 5-minute returns
 - `max_drawdown_5m`: Maximum drawdown within rolling 5-minute windows
@@ -177,25 +192,12 @@ python data_processing/build_polygon_cache.py \
 **Note:** Minute features are automatically filtered to the same price range as the pre-filtered daily dataset (default: $1-9.99).
 
 **Options:**
+
 - `--vol-spike-lookback N`: Days for volume spike comparison (default: 20)
 
 ### 3. MACD Features
 
-#### Option A: Full MACD Cache (All Data at Once)
-
-Process all minute data to create MACD features:
-
-```bash
-python data_processing/build_macd_cache.py \
-  --input-root data/2025/polygon_minute_aggs \
-  --out-root data/2025/cache/macd_day_features \
-  --partitioned
-```
-
-**Output file:**
-- `data/2025/cache/macd_day_features/macd_day_features.parquet`
-
-#### Option B: Incremental MACD Features (Recommended)
+#### Option A: Incremental MACD Features (Recommended)
 
 Process day-by-day for incremental updates:
 
@@ -207,13 +209,31 @@ python data_processing/build_macd_day_features_incremental.py \
 ```
 
 **Output directory:**
+
 - `data/2025/cache/macd_day_features_inc/mode=all/date=YYYY-MM-DD.parquet`
 
+#### Option B: Full MACD Cache (All Data at Once)
+
+Process all minute data to create MACD features:
+
+```bash
+python data_processing/build_macd_cache.py \
+  --input-root data/2025/polygon_minute_aggs \
+  --out-root data/2025/cache/macd_day_features \
+  --partitioned
+```
+
+**Output file:**
+
+- `data/2025/cache/macd_day_features/macd_day_features.parquet`
+
 **Options:**
+
 - `--mode all`: Use all trading hours (default)
 - `--mode rth`: Use regular trading hours only (9:30 AM - 4:00 PM ET)
 
 **MACD Features:**
+
 - Computed on 1-minute and 5-minute timeframes
 - Per ticker-day: `macd_last`, `signal_last`, `hist_last`, `hist_min`, `hist_max`
 - Zero-crossing counts: `hist_zero_cross_up_count`, `hist_zero_cross_down_count`
@@ -228,6 +248,7 @@ python data_processing/join_macd_with_volitility_dataset.py
 ```
 
 **Output file:**
+
 - `data/2025/cache/minute_features_plus_macd.parquet`
 
 This creates an enriched dataset combining volatility features with MACD indicators.
@@ -235,6 +256,7 @@ This creates an enriched dataset combining volatility features with MACD indicat
 ### Complete Processing Pipeline
 
 **Option 1: Use the helper script (recommended)**
+
 ```bash
 python data_processing/process_all_data.py
 ```
@@ -276,22 +298,26 @@ Use the provided script to start both servers:
 ```
 
 This starts:
-- API server on http://localhost:8000
-- Frontend dev server on http://localhost:3000
+
+- API server on <http://localhost:8000>
+- Frontend dev server on <http://localhost:3000>
 
 ### Option 2: Manual Startup
 
 **Terminal 1 - API Server:**
+
 ```bash
 python backend/api_server.py
 ```
 
 Or with auto-reload:
+
 ```bash
 uvicorn backend.api_server:app --reload
 ```
 
 **Terminal 2 - Frontend:**
+
 ```bash
 cd frontend
 npm run dev
@@ -299,7 +325,7 @@ npm run dev
 
 ### Using the Web Interface
 
-1. Open http://localhost:3000 in your browser
+1. Open <http://localhost:3000> in your browser
 2. Select a dataset from the dropdown:
    - `daily`: Full daily dataset
    - `weekly`: Weekly aggregates
@@ -386,6 +412,7 @@ curl -X POST http://localhost:8000/api/query \
 ### Daily Dataset (`daily_2025.parquet`)
 
 **Columns:**
+
 - `date`, `ticker`, `open`, `high`, `low`, `close`, `volume`
 - `ret_d`: Daily return percentage `(close / prev_close) - 1` (if `--add-returns`)
 - `close_in_band`: Boolean indicating if close is in price range (default: $1-9.99)
@@ -396,6 +423,7 @@ curl -X POST http://localhost:8000/api/query \
 ### Weekly Dataset (`weekly.parquet`)
 
 **Columns:**
+
 - `week_start`: Start date of trading week (Monday)
 - `ticker`, `close_w`, `ret_w`, `year`, `week`
 - `abs_ret_w`: Absolute weekly return percentage `|ret_w|`
@@ -404,6 +432,7 @@ curl -X POST http://localhost:8000/api/query \
 ### Minute Features Dataset (`minute_features.parquet`)
 
 **Columns:**
+
 - `ticker`, `date`
 - `day_range_pct`: Intraday volatility `(high - low) / open`
 - `max_1m_ret`, `max_5m_ret`: Maximum returns over 1-minute and 5-minute periods
@@ -415,6 +444,7 @@ curl -X POST http://localhost:8000/api/query \
 ### MACD Features Dataset
 
 **Columns (per timeframe, suffixed with `__1m` or `__5m`):**
+
 - `close_last__{tf}`: Last close price for the day
 - `macd_last__{tf}`, `signal_last__{tf}`, `hist_last__{tf}`: Final MACD values
 - `hist_min__{tf}`, `hist_max__{tf}`: Min/max histogram values for the day
@@ -429,6 +459,7 @@ Combines all columns from `minute_features` with all MACD columns.
 ### API Server Issues
 
 **API server won't start:**
+
 ```bash
 # Test setup
 python tests/test_api.py
@@ -441,6 +472,7 @@ ls data/2025/cache/*.parquet
 ```
 
 **Frontend can't connect to API (ECONNREFUSED):**
+
 ```bash
 # Check if API is running
 curl http://localhost:8000/health
@@ -455,6 +487,7 @@ tail -f api_server.log  # if using start_dev.sh
 ### Data Processing Issues
 
 **No data showing:**
+
 ```bash
 # Ensure cache files are built
 python data_processing/process_all_data.py
@@ -463,10 +496,13 @@ python data_processing/build_polygon_cache.py --input-root data/2025/polygon_day
 ```
 
 # Check which datasets are available
-curl http://localhost:8000/api/datasets
+
+curl <http://localhost:8000/api/datasets>
 
 # Verify file paths
+
 ls -lh data/2025/cache/*.parquet
+
 ```
 
 **Minute features have many null values:**
@@ -491,6 +527,7 @@ npm install
 ```
 
 **Type errors:**
+
 ```bash
 cd frontend
 npm run build  # Check for TypeScript errors
@@ -512,11 +549,13 @@ This project is dual-licensed:
 For non-commercial use, this software is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)**.
 
 You are free to:
+
 - Share and redistribute the software
 - Adapt and modify the software
 - Use the software for personal, educational, or research purposes
 
 Under the following terms:
+
 - **Attribution**: You must give appropriate credit
 - **NonCommercial**: You may not use the software for commercial purposes
 
