@@ -23,6 +23,8 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional, Tuple, List
+from multiprocessing import Pool, cpu_count
 import polars as pl
 
 # Add parent directory to path for imports
@@ -483,6 +485,79 @@ def build_minute_features(minute_lf: pl.LazyFrame, daily_lf: pl.LazyFrame, vol_l
     )
 
 
+def process_minute_batch(
+    args: Tuple[
+        List[str],  # batch_dates
+        int,  # batch_num
+        str,  # minute_input_glob
+        str,  # daily_path (path to daily parquet for reloading)
+        int,  # vol_lookback_days
+        float,  # price_min
+        float,  # price_max
+        Path,  # temp_dir
+        str,  # compression
+        bool,  # partitioned
+    ]
+) -> Optional[Path]:
+    """
+    Process a single batch of minute features.
+    This function is designed to be called in parallel.
+    
+    Returns:
+        Path to the temporary batch file if successful, None otherwise
+    """
+    (
+        batch_dates,
+        batch_num,
+        minute_input_glob,
+        daily_path,
+        vol_lookback_days,
+        price_min,
+        price_max,
+        temp_dir,
+        compression,
+        partitioned,
+    ) = args
+    
+    try:
+        # Reload daily data in worker (LazyFrame can't be pickled)
+        daily_lf = pl.scan_parquet(daily_path) if daily_path else None
+        
+        # Load minute data for this batch
+        minute_lf = build_minute_lazy(minute_input_glob)
+        batch_minute_lf = minute_lf.filter(pl.col("date").is_in(batch_dates))
+        
+        # Process this batch
+        batch_features = build_minute_features(
+            batch_minute_lf,
+            daily_lf,
+            vol_lookback_days=vol_lookback_days,
+            price_min=price_min,
+            price_max=price_max
+        )
+        
+        # Collect using streaming engine
+        batch_df = batch_features.collect(streaming=True)
+        
+        if len(batch_df) > 0:
+            # Add year/month columns if needed for partitioning
+            if partitioned and "year" not in batch_df.columns:
+                batch_df = batch_df.with_columns([
+                    pl.col("date").dt.year().alias("year"),
+                    pl.col("date").dt.month().alias("month"),
+                ])
+            
+            # Write batch to temporary file
+            batch_file = temp_dir / f"batch_{batch_num:04d}.parquet"
+            batch_df.write_parquet(batch_file, compression=compression)
+            return batch_file
+        else:
+            return None
+    except Exception as e:
+        print(f"  ⚠️  Error processing batch {batch_num}: {e}")
+        return None
+
+
 def write_parquet(
     lf: pl.LazyFrame,
     out_path: Path,
@@ -513,13 +588,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input-root",
-        default="data/2025/polygon_day_aggs",
-        help="Folder containing month subfolders with *.csv.gz files",
+        default="data",
+        help="Root folder containing year subfolders (e.g., data/) or specific year folder (e.g., data/2025/polygon_day_aggs). "
+             "If root folder, will search for **/*.csv.gz across all year directories.",
     )
     parser.add_argument(
         "--out-daily",
-        default="data/cache/daily_2025.parquet",
-        help="Output Parquet path (file if --single-file, or directory if --partitioned)",
+        default="data/cache/daily_all.parquet",
+        help="Output Parquet path (file if --single-file, or directory if --partitioned). "
+             "Defaults to daily_all.parquet for multi-year processing.",
     )
     parser.add_argument(
         "--out-weekly",
@@ -574,8 +651,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--input-minute-root",
-        default="data/2025/polygon_minute_aggs",
-        help="Folder containing month subfolders with minute *.csv.gz files",
+        default="data",
+        help="Root folder containing year subfolders (e.g., data/) or specific year folder (e.g., data/2025/polygon_minute_aggs). "
+             "If root folder, will search for **/*.csv.gz across all year directories.",
     )
     parser.add_argument(
         "--out-minute-features",
@@ -592,6 +670,12 @@ def main() -> None:
         type=int,
         default=20,
         help="Number of days for volume spike comparison (default: 20)",
+    )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Number of parallel workers for minute features batch processing (default: auto-detect, use 1 for sequential)",
     )
 
     args = parser.parse_args()
@@ -662,50 +746,68 @@ def main() -> None:
             
             # Process in smaller batches to keep memory manageable
             batch_size = 10  # Reduced from 30 to process smaller chunks
-            batch_files = []
             
             # Create temporary directory for batch files
             import tempfile
             import shutil
             temp_dir = Path(tempfile.mkdtemp(prefix="minute_features_batch_"))
+            
+            # Determine number of workers
+            n_jobs = args.n_jobs
+            if n_jobs is None:
+                n_jobs = max(1, cpu_count() - 1)  # Leave one core free
+            elif n_jobs == 1:
+                n_jobs = 1  # Sequential processing
+            
+            print(f"Using {n_jobs} parallel worker(s) for batch processing")
+            
+            # Prepare batch arguments
+            batch_args = []
+            for i in range(0, len(unique_dates), batch_size):
+                batch_dates = unique_dates[i:i+batch_size]
+                batch_num = i//batch_size + 1
+                batch_args.append((
+                    batch_dates,
+                    batch_num,
+                    minute_input_glob,
+                    str(Path(args.out_daily)),  # Path to daily data for reloading in workers
+                    args.vol_spike_lookback,
+                    args.prefilter_price_range[0],
+                    args.prefilter_price_range[1],
+                    temp_dir,
+                    args.compression,
+                    args.partitioned,
+                ))
+            
+            batch_files = []
             try:
-                for i in range(0, len(unique_dates), batch_size):
-                    batch_dates = unique_dates[i:i+batch_size]
-                    batch_num = i//batch_size + 1
-                    total_batches = (len(unique_dates)-1)//batch_size + 1
-                    print(f"Processing batch {batch_num}/{total_batches}: {batch_dates[0]} to {batch_dates[-1]}")
-                    
-                    # Filter minute data to this batch of dates
-                    batch_minute_lf = minute_lf.filter(pl.col("date").is_in(batch_dates))
-                    
-                    # Process this batch
-                    batch_features = build_minute_features(
-                        batch_minute_lf,
-                        daily,
-                        vol_lookback_days=args.vol_spike_lookback,
-                        price_min=args.prefilter_price_range[0],
-                        price_max=args.prefilter_price_range[1]
-                    )
-                    
-                    # Collect using streaming engine and write to temp file immediately
-                    batch_df = batch_features.collect(streaming=True)
-                    
-                    if len(batch_df) > 0:
-                        # Add year/month columns if needed for partitioning
-                        if args.partitioned and "year" not in batch_df.columns:
-                            batch_df = batch_df.with_columns([
-                                pl.col("date").dt.year().alias("year"),
-                                pl.col("date").dt.month().alias("month"),
-                            ])
+                if n_jobs == 1:
+                    # Sequential processing (fallback)
+                    for batch_arg in batch_args:
+                        batch_dates, batch_num = batch_arg[0], batch_arg[1]
+                        total_batches = len(batch_args)
+                        print(f"Processing batch {batch_num}/{total_batches}: {batch_dates[0]} to {batch_dates[-1]}")
                         
-                        # Write batch to temporary file
-                        batch_file = temp_dir / f"batch_{batch_num:04d}.parquet"
-                        batch_df.write_parquet(batch_file, compression=args.compression)
-                        batch_files.append(batch_file)
-                        print(f"  Wrote batch {batch_num} ({len(batch_df):,} rows) to temp file")
+                        batch_file = process_minute_batch(batch_arg)
+                        if batch_file is not None:
+                            batch_files.append(batch_file)
+                            print(f"  Wrote batch {batch_num} to temp file")
+                else:
+                    # Parallel processing
+                    total_batches = len(batch_args)
+                    with Pool(processes=n_jobs) as pool:
+                        results = pool.imap_unordered(process_minute_batch, batch_args)
+                        processed = 0
+                        for batch_file in results:
+                            processed += 1
+                            if batch_file is not None:
+                                batch_files.append(batch_file)
+                                print(f"  Completed batch {processed}/{total_batches}")
+                            else:
+                                print(f"  ⚠️  Batch {processed}/{total_batches} produced no data")
                     
-                    # Clear intermediate data
-                    del batch_minute_lf, batch_features, batch_df
+                    # Sort batch files by batch number for consistent ordering
+                    batch_files.sort(key=lambda p: int(p.stem.split('_')[1]))
                 
                 # Combine all batch files using lazy concatenation
                 print(f"Combining {len(batch_files)} batches...")
