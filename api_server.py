@@ -135,10 +135,37 @@ def load_dataset(dataset: str, materialize: bool = False) -> pl.DataFrame | pl.L
     
     cache_dir = Path("data/cache")
     
+    # For "daily" dataset, try to find the actual file (could be daily_2025.parquet, daily_all.parquet, etc.)
+    def find_daily_dataset() -> Path:
+        """Find the daily dataset file (handles dynamic naming)."""
+        # Try common patterns in order of preference
+        patterns = [
+            "daily_all.parquet",  # Multi-year
+            "daily_2026.parquet",  # Current year
+            "daily_2025.parquet",  # Previous year
+            "daily_2025_2026.parquet",  # Year range
+        ]
+        
+        # Also check for any daily_*.parquet files
+        if cache_dir.exists():
+            daily_files = list(cache_dir.glob("daily_*.parquet"))
+            if daily_files:
+                # Prefer "all" or most recent year
+                for pattern in patterns:
+                    for f in daily_files:
+                        if f.name == pattern:
+                            return f
+                # Return the first one found
+                return daily_files[0]
+        
+        # Fallback to default
+        return cache_dir / "daily_all.parquet"
+    
     dataset_map = {
-        "daily": "daily_2025.parquet",
+        "daily": None,  # Will be resolved dynamically
         "weekly": "weekly.parquet",
-        "filtered": "daily_filtered_1_9.99.parquet",
+        "filtered": "daily_filtered_scored.parquet",  # Use scored filtered dataset if available, fallback to old one
+        "filtered_legacy": "daily_filtered_1_9.99.parquet",  # Old price-filtered dataset
         "minute_features": "minute_features.parquet",
         "minute_features_plus_macd": "minute_features_plus_macd.parquet",
     }
@@ -146,12 +173,23 @@ def load_dataset(dataset: str, materialize: bool = False) -> pl.DataFrame | pl.L
     if dataset not in dataset_map:
         raise ValueError(f"Unknown dataset: {dataset}")
     
-    parquet_path = cache_dir / dataset_map[dataset]
+    # Resolve daily dataset dynamically
+    if dataset == "daily":
+        parquet_path = find_daily_dataset()
+    else:
+        parquet_path = cache_dir / dataset_map[dataset]
+    
+    # For "filtered" dataset, check if scored version exists, otherwise fallback to legacy
+    if dataset == "filtered" and not parquet_path.exists():
+        legacy_path = cache_dir / dataset_map.get("filtered_legacy", "daily_filtered_1_9.99.parquet")
+        if legacy_path.exists():
+            parquet_path = legacy_path
+            print(f"Note: Using legacy filtered dataset. Run build_filtered_from_scoring.py to create scored version.")
     
     if not parquet_path.exists():
         raise FileNotFoundError(
             f"Dataset file not found: {parquet_path}. "
-            f"Please run: python process_all_data.py to generate the cache files."
+            f"Please run: python data_processing/process_all_data.py to generate the cache files."
         )
     
     try:
