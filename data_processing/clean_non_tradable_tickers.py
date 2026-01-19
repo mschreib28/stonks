@@ -130,7 +130,7 @@ def main():
     else:
         # Clean all main dataset files
         dataset_files = [
-            "daily_2025.parquet",
+            "daily_all.parquet",
             "daily_filtered_1_9.99.parquet",
             "weekly.parquet",
             "minute_features.parquet",

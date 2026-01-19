@@ -35,6 +35,37 @@ except ImportError:
 # Default paths - cache is shared across all years, raw data is partitioned by year
 CACHE_DIR = Path("data/cache")
 
+def get_available_years() -> list[int]:
+    """Get all available years from data directories."""
+    years = []
+    data_root = Path("data")
+    if data_root.exists():
+        for year_dir in sorted(data_root.iterdir()):
+            if year_dir.is_dir() and year_dir.name.isdigit():
+                years.append(int(year_dir.name))
+    return sorted(years)
+
+def get_daily_output_filename() -> str:
+    """Get dynamic daily output filename based on available years."""
+    years = get_available_years()
+    if not years:
+        # Fallback to current year if no data directories found
+        from datetime import datetime
+        current_year = datetime.now().year
+        return f"daily_{current_year}.parquet"
+    
+    if len(years) == 1:
+        return f"daily_{years[0]}.parquet"
+    else:
+        # Multiple years: use range or "all"
+        min_year = min(years)
+        max_year = max(years)
+        # If years span more than 2, use "all"
+        if max_year - min_year > 1:
+            return "daily_all.parquet"
+        else:
+            return f"daily_{min_year}_{max_year}.parquet"
+
 def get_all_daily_inputs() -> list[Path]:
     """Get all daily input directories from all year directories."""
     inputs = []
@@ -60,9 +91,12 @@ def get_all_minute_inputs() -> list[Path]:
     return inputs
 
 # Output files
-DAILY_OUTPUT = CACHE_DIR / "daily_2025.parquet"
+# Dynamic output filename based on available years
+# Will be set in process_daily_weekly() based on actual data
+DAILY_OUTPUT = CACHE_DIR / "daily_all.parquet"  # Default, will be updated dynamically
 WEEKLY_OUTPUT = CACHE_DIR / "weekly.parquet"
-FILTERED_OUTPUT = CACHE_DIR / "daily_filtered_1_9.99.parquet"
+FILTERED_OUTPUT = CACHE_DIR / "daily_filtered_1_9.99.parquet"  # Legacy price-filtered
+FILTERED_SCORED_OUTPUT = CACHE_DIR / "daily_filtered_scored.parquet"  # New scored-filtered
 MINUTE_FEATURES_OUTPUT = CACHE_DIR / "minute_features.parquet"
 MACD_INC_DIR = CACHE_DIR / "macd_day_features_inc" / "mode=all"
 MINUTE_MACD_OUTPUT = CACHE_DIR / "minute_features_plus_macd.parquet"
@@ -175,6 +209,12 @@ def process_daily_weekly(force: bool = False) -> bool:
     
     print(f"✓ Total: {total_count} daily CSV files\n")
     
+    # Determine output filename based on available years
+    global DAILY_OUTPUT
+    daily_output_filename = get_daily_output_filename()
+    DAILY_OUTPUT = CACHE_DIR / daily_output_filename
+    print(f"✓ Output file: {DAILY_OUTPUT}")
+    
     # Process daily/weekly - combine data from all year directories
     # The build_polygon_cache.py script uses input_root/**/*.csv.gz glob pattern
     # By pointing to the parent 'data/' directory, the glob will find files in
@@ -186,13 +226,15 @@ def process_daily_weekly(force: bool = False) -> bool:
         sys.executable,
         "data_processing/build_polygon_cache.py",
         "--input-root", str(data_root),
+        "--out-daily", str(DAILY_OUTPUT),
         "--add-returns",
         "--build-weekly",
         # Defaults are now in build_polygon_cache.py: min_avg_volume=750000, min_days=60
     ]
     
     if len(daily_inputs) > 1:
-        print(f"✓ Processing data from {len(daily_inputs)} year directories: {[d.parent.name for d in daily_inputs]}")
+        years = [d.parent.name for d in daily_inputs]
+        print(f"✓ Processing data from {len(daily_inputs)} year directories: {years}")
     
     if not force:
         # Check if we need to rebuild based on dates
@@ -440,6 +482,65 @@ def build_scoring_index(force: bool = False) -> bool:
     return run_command(cmd, "Scoring Index", skip_if_exists=SCORING_INDEX_OUTPUT if not force else None)
 
 
+def build_scored_filtered_dataset(force: bool = False) -> bool:
+    """Build filtered dataset from scoring results on daily dataset."""
+    print("=" * 60)
+    print("Step 7: Building Scored Filtered Dataset")
+    print("=" * 60)
+    
+    # Find the actual daily output file (may have been set dynamically)
+    # If DAILY_OUTPUT doesn't exist, try to find it
+    daily_path = DAILY_OUTPUT
+    if not daily_path.exists():
+        cache_dir = Path("data/cache")
+        daily_files = list(cache_dir.glob("daily_*.parquet"))
+        if daily_files:
+            # Prefer "daily_all.parquet" or most recent
+            preferred = [f for f in daily_files if f.name == "daily_all.parquet"]
+            if preferred:
+                daily_path = preferred[0]
+            else:
+                daily_path = max(daily_files, key=lambda p: p.stat().st_mtime)
+    
+    if not check_output_exists(daily_path):
+        print(f"⚠️  Error: Daily dataset not found: {daily_path}")
+        print("   Please run daily processing first.")
+        return False
+    
+    print(f"✓ Daily dataset found: {daily_path}\n")
+    
+    # Build scored filtered dataset
+    cmd = [
+        sys.executable,
+        "data_processing/build_filtered_from_scoring.py",
+        "--daily-path", str(daily_path),
+        "--output", str(FILTERED_SCORED_OUTPUT),
+        "--min-daily-range", "0.05",  # Filter out flat stocks
+        "--min-score", "0.0",  # No minimum score, but other filters apply
+        "--n-jobs", "8",  # Use 8 parallel workers (similar to technical features)
+    ]
+    
+    if not force:
+        # Check if we need to rebuild based on dates
+        if check_output_exists(FILTERED_SCORED_OUTPUT):
+            cache_latest = get_latest_date_in_cache(FILTERED_SCORED_OUTPUT)
+            daily_latest = get_latest_date_in_cache(daily_path)
+            
+            if cache_latest and daily_latest:
+                print(f"   Scored filtered dataset latest date: {cache_latest}")
+                print(f"   Daily dataset latest date: {daily_latest}")
+                if daily_latest <= cache_latest:
+                    print(f"⏭️  Skipping scored filtered dataset build (dataset is up to date)")
+                    return True
+                else:
+                    print(f"🔄 Dataset needs update (daily dataset has newer dates)")
+            else:
+                print(f"⏭️  Skipping scored filtered dataset build (dataset already exists)")
+                return True
+    
+    return run_command(cmd, "Scored Filtered Dataset", skip_if_exists=FILTERED_SCORED_OUTPUT if not force else None)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Load and process all data with recommended defaults",
@@ -464,7 +565,7 @@ Examples:
     parser.add_argument(
         "--steps",
         nargs="+",
-        choices=["daily", "minute", "macd", "join", "technical", "scoring_index"],
+        choices=["daily", "minute", "macd", "join", "technical", "scoring_index", "scored_filtered"],
         help="Process only specific steps (default: all)",
     )
     parser.add_argument(
@@ -479,7 +580,7 @@ Examples:
     if args.steps:
         steps_to_run = set(args.steps)
     else:
-        steps_to_run = {"daily", "minute", "macd", "join", "technical", "scoring_index"}
+        steps_to_run = {"daily", "minute", "macd", "join", "technical", "scoring_index", "scored_filtered"}
     
     print("=" * 60)
     print("Stonks Data Processing Pipeline")
@@ -535,6 +636,13 @@ Examples:
             if not args.force:
                 print("⚠️  Scoring index build failed. Continuing...\n")
     
+    # Step 7: Scored Filtered Dataset
+    if "scored_filtered" in steps_to_run:
+        if not build_scored_filtered_dataset(force=args.force):
+            success = False
+            if not args.force:
+                print("⚠️  Scored filtered dataset build failed. Continuing...\n")
+    
     # Summary
     print("=" * 60)
     print("Processing Summary")
@@ -543,7 +651,8 @@ Examples:
     outputs = {
         "Daily": DAILY_OUTPUT,
         "Weekly": WEEKLY_OUTPUT,
-        "Filtered": FILTERED_OUTPUT,
+        "Filtered (Legacy)": FILTERED_OUTPUT,
+        "Filtered (Scored)": FILTERED_SCORED_OUTPUT,
         "Minute Features": MINUTE_FEATURES_OUTPUT,
         "MACD Features": MACD_INC_DIR,
         "Minute + MACD": MINUTE_MACD_OUTPUT,

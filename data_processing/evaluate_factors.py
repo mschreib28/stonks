@@ -484,7 +484,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--price-path",
-        default="data/cache/daily_2025.parquet",
+        default="data/cache/daily_all.parquet",
         help="Path to price data parquet file",
     )
     parser.add_argument(

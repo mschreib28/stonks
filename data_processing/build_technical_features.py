@@ -406,7 +406,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--daily-path",
-        default="data/cache/daily_2025.parquet",
+        default="data/cache/daily_all.parquet",
         help="Path to daily parquet file",
     )
     parser.add_argument(
