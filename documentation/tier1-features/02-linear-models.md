@@ -1,6 +1,6 @@
 # Linear Models & Cross-Validation (Tier 1)
 
-**Status**: 🟡 Partial (Time-series CV complete, linear models in progress)  
+**Status**: ✅ Complete (Time-series CV complete, linear models in progress)  
 **Module**: `data_processing/train_ml_model.py`  
 **Book Reference**: Machine Learning for Algorithmic Trading, Chapter 3
 
