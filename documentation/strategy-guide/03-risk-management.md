@@ -74,40 +74,6 @@ Actual risk: 4,444 × $0.20 = $889 (0.89% of account)
 
 ## Stop-Loss Strategies
 
-### Types of Stops
-
-#### 1. Fixed Percentage Stop
-```
-Stop = Entry × (1 - stop_percentage)
-Example: $5.00 × (1 - 0.05) = $4.75
-```
-**Pros**: Simple, consistent
-**Cons**: Doesn't adapt to volatility
-
-#### 2. ATR-Based Stop
-```
-Stop = Entry - (ATR × multiplier)
-Example: $5.00 - ($0.25 × 2) = $4.50
-```
-**Pros**: Adapts to volatility
-**Cons**: Requires ATR calculation
-
-#### 3. Support/Resistance Stop
-```
-Stop = Below significant support level
-Example: Support at $4.40, stop at $4.35
-```
-**Pros**: Technically sound
-**Cons**: Requires chart analysis
-
-#### 4. Time-Based Stop
-```
-Exit if target not hit within X days
-Example: Exit after 5 days regardless
-```
-**Pros**: Frees capital
-**Cons**: May miss eventual move
-
 ### Recommended: ATR-Based Stops
 
 For Stonks swing trading:
@@ -122,6 +88,32 @@ Why 2× ATR?
 - 1× ATR: Too tight, stopped out by noise
 - 2× ATR: Room to breathe, catches real reversals
 - 3× ATR: Very wide, slow to exit losers
+
+### Alternative Stop-Loss Methods
+
+#### 1. Fixed Percentage Stop
+```
+Stop = Entry × (1 - stop_percentage)
+Example: $5.00 × (1 - 0.05) = $4.75
+```
+**Pros**: Simple, consistent
+**Cons**: Doesn't adapt to volatility
+
+#### 2. Support/Resistance Stop
+```
+Stop = Below significant support level
+Example: Support at $4.40, stop at $4.35
+```
+**Pros**: Technically sound
+**Cons**: Requires chart analysis
+
+#### 3. Time-Based Stop
+```
+Exit if target not hit within X days
+Example: Exit after 5 days regardless
+```
+**Pros**: Frees capital
+**Cons**: May miss eventual move
 
 ## Profit Targets
 
