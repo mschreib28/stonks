@@ -35,7 +35,7 @@ const AVAILABLE_METRICS = [
   { name: 'position_pct_of_volume', label: 'Position % of Volume', description: '10k shares as % of daily volume (lower = less market impact)' },
   
   // Daily range in dollars
-  { name: 'avg_daily_range_dollars', label: 'Avg Daily Range ($)', description: 'Average daily high-low range in dollars' },
+  { name: 'avg_daily_range_dollars', label: 'Avg Daily Range ($)', description: 'Average daily price movement (high - low) in dollars. Example: stock moves $5.00 to $5.60 = $0.60 range' },
   { name: 'median_daily_range_dollars', label: 'Median Daily Range ($)', description: 'Median daily high-low range in dollars' },
   { name: 'sweet_spot_range_pct', label: 'Sweet Spot Days %', description: '% of days with $0.20-$0.60 range (ideal for swing trading)' },
   { name: 'daily_range_cv', label: 'Range Consistency (CV)', description: 'Coefficient of variation of daily range (lower = more predictable)' },
