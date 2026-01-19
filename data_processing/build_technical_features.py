@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from multiprocessing import Pool, cpu_count
 import polars as pl
 import pandas as pd
 
@@ -175,62 +176,86 @@ def compute_historical_volatility(df: pd.DataFrame, period: int = 20) -> pd.Seri
     return hist_vol
 
 
-def add_technical_indicators_pandas(df: pd.DataFrame) -> pd.DataFrame:
+def process_single_ticker(ticker_data: tuple[str, pd.DataFrame]) -> pd.DataFrame:
+    """
+    Process technical indicators for a single ticker.
+    This function is designed to be called in parallel.
+    """
+    ticker, group = ticker_data
+    group = group.sort_values('date').copy()
+    
+    # Momentum indicators
+    group['rsi_14'] = compute_rsi(group, period=14)
+    stoch_k, stoch_d = compute_stochastic(group, k_period=14, d_period=3)
+    group['stoch_k'] = stoch_k
+    group['stoch_d'] = stoch_d
+    group['roc_10'] = compute_roc(group, period=10)
+    
+    # Trend indicators
+    group['adx_14'] = compute_adx(group, period=14)
+    bb_upper, bb_middle, bb_lower = compute_bollinger_bands(group, period=20, std_dev=2.0)
+    group['bb_upper'] = bb_upper
+    group['bb_middle'] = bb_middle
+    group['bb_lower'] = bb_lower
+    group['bb_pct'] = (group['close'] - bb_lower) / (bb_upper - bb_lower)  # Position within bands
+    
+    # SMA crossovers
+    group['sma_cross_20_50'] = compute_sma_crossover(group, fast=20, slow=50)
+    group['sma_cross_50_200'] = compute_sma_crossover(group, fast=50, slow=200)
+    
+    # Simple moving averages
+    group['sma_20'] = group['close'].rolling(window=20).mean()
+    group['sma_50'] = group['close'].rolling(window=50).mean()
+    group['sma_200'] = group['close'].rolling(window=200).mean()
+    
+    # Volume indicators
+    group['obv'] = compute_obv(group)
+    group['vwap'] = compute_vwap(group)
+    
+    # Volatility indicators
+    group['atr_14'] = compute_atr(group, period=14)
+    group['hist_vol_20'] = compute_historical_volatility(group, period=20)
+    
+    # Derived signals
+    # RSI overbought/oversold
+    group['rsi_overbought'] = (group['rsi_14'] > 70).astype(int)
+    group['rsi_oversold'] = (group['rsi_14'] < 30).astype(int)
+    
+    # Price relative to Bollinger Bands
+    group['above_bb_upper'] = (group['close'] > group['bb_upper']).astype(int)
+    group['below_bb_lower'] = (group['close'] < group['bb_lower']).astype(int)
+    
+    # Trend strength
+    group['strong_trend'] = (group['adx_14'] > 25).astype(int)
+    
+    return group
+
+
+def add_technical_indicators_pandas(df: pd.DataFrame, n_jobs: int | None = None) -> pd.DataFrame:
     """
     Add all technical indicators to a pandas DataFrame.
     Assumes DataFrame has: ticker, date, open, high, low, close, volume
-    """
-    # Group by ticker and apply indicators
-    result_dfs = []
     
-    for ticker, group in df.groupby('ticker'):
-        group = group.sort_values('date').copy()
-        
-        # Momentum indicators
-        group['rsi_14'] = compute_rsi(group, period=14)
-        stoch_k, stoch_d = compute_stochastic(group, k_period=14, d_period=3)
-        group['stoch_k'] = stoch_k
-        group['stoch_d'] = stoch_d
-        group['roc_10'] = compute_roc(group, period=10)
-        
-        # Trend indicators
-        group['adx_14'] = compute_adx(group, period=14)
-        bb_upper, bb_middle, bb_lower = compute_bollinger_bands(group, period=20, std_dev=2.0)
-        group['bb_upper'] = bb_upper
-        group['bb_middle'] = bb_middle
-        group['bb_lower'] = bb_lower
-        group['bb_pct'] = (group['close'] - bb_lower) / (bb_upper - bb_lower)  # Position within bands
-        
-        # SMA crossovers
-        group['sma_cross_20_50'] = compute_sma_crossover(group, fast=20, slow=50)
-        group['sma_cross_50_200'] = compute_sma_crossover(group, fast=50, slow=200)
-        
-        # Simple moving averages
-        group['sma_20'] = group['close'].rolling(window=20).mean()
-        group['sma_50'] = group['close'].rolling(window=50).mean()
-        group['sma_200'] = group['close'].rolling(window=200).mean()
-        
-        # Volume indicators
-        group['obv'] = compute_obv(group)
-        group['vwap'] = compute_vwap(group)
-        
-        # Volatility indicators
-        group['atr_14'] = compute_atr(group, period=14)
-        group['hist_vol_20'] = compute_historical_volatility(group, period=20)
-        
-        # Derived signals
-        # RSI overbought/oversold
-        group['rsi_overbought'] = (group['rsi_14'] > 70).astype(int)
-        group['rsi_oversold'] = (group['rsi_14'] < 30).astype(int)
-        
-        # Price relative to Bollinger Bands
-        group['above_bb_upper'] = (group['close'] > group['bb_upper']).astype(int)
-        group['below_bb_lower'] = (group['close'] < group['bb_lower']).astype(int)
-        
-        # Trend strength
-        group['strong_trend'] = (group['adx_14'] > 25).astype(int)
-        
-        result_dfs.append(group)
+    Args:
+        df: Input DataFrame with OHLCV data
+        n_jobs: Number of parallel workers (None = auto-detect, 1 = sequential)
+    """
+    # Group by ticker
+    ticker_groups = list(df.groupby('ticker'))
+    
+    # Determine number of workers
+    if n_jobs is None:
+        n_jobs = max(1, cpu_count() - 1)  # Leave one core free
+    elif n_jobs == 1:
+        # Sequential processing (fallback)
+        result_dfs = []
+        for ticker_data in ticker_groups:
+            result_dfs.append(process_single_ticker(ticker_data))
+        return pd.concat(result_dfs, ignore_index=True)
+    
+    # Parallel processing
+    with Pool(processes=n_jobs) as pool:
+        result_dfs = pool.map(process_single_ticker, ticker_groups)
     
     return pd.concat(result_dfs, ignore_index=True)
 
@@ -261,14 +286,71 @@ def build_technical_features_lazy(input_glob: str) -> pl.LazyFrame:
     return pl.from_pandas(df).lazy()
 
 
-def build_technical_features_from_daily(daily_path: str, output_path: str) -> None:
+def get_latest_date_in_parquet(parquet_path: Path | str) -> str | None:
+    """
+    Get the latest date from a parquet file.
+    Returns date as string (YYYY-MM-DD) or None if file doesn't exist or has no date column.
+    """
+    parquet_path = Path(parquet_path)
+    if not parquet_path.exists():
+        return None
+    
+    try:
+        # Use lazy loading to only read the date column
+        df = pl.scan_parquet(parquet_path)
+        schema_names = df.collect_schema().names()
+        
+        if "date" not in schema_names:
+            return None
+        
+        # Get max date using lazy evaluation
+        max_date = df.select(pl.col("date").max()).collect()
+        if max_date.height == 0 or max_date[0, 0] is None:
+            return None
+        
+        latest_date = max_date[0, 0]
+        # Convert to string if it's a date object
+        if isinstance(latest_date, str):
+            return latest_date
+        return str(latest_date)
+    except Exception as e:
+        print(f"⚠️  Warning: Could not read latest date from {parquet_path}: {e}")
+        return None
+
+
+def build_technical_features_from_daily(daily_path: str, output_path: str, n_jobs: int | None = None, force: bool = False) -> None:
     """
     Build technical features from daily cache file.
     
     Args:
         daily_path: Path to daily parquet file
         output_path: Path to output parquet file
+        n_jobs: Number of parallel workers (None = auto-detect, 1 = sequential)
+        force: If True, rebuild even if output is up to date
     """
+    daily_path_obj = Path(daily_path)
+    output_path_obj = Path(output_path)
+    
+    # Check if we can skip processing
+    if not force and output_path_obj.exists():
+        print(f"Checking if rebuild is needed...")
+        daily_latest = get_latest_date_in_parquet(daily_path_obj)
+        output_latest = get_latest_date_in_parquet(output_path_obj)
+        
+        if daily_latest and output_latest:
+            print(f"   Daily data latest date: {daily_latest}")
+            print(f"   Technical features latest date: {output_latest}")
+            if daily_latest <= output_latest:
+                print(f"⏭️  Skipping technical features processing (output is up to date)")
+                print(f"   Use --force to rebuild anyway")
+                return
+            else:
+                print(f"🔄 Output needs update (daily data has newer dates)")
+        elif output_latest:
+            print(f"⏭️  Skipping technical features processing (output already exists)")
+            print(f"   Use --force to rebuild anyway")
+            return
+    
     print(f"Loading daily data from: {daily_path}")
     
     # Load daily data
@@ -283,10 +365,13 @@ def build_technical_features_from_daily(daily_path: str, output_path: str) -> No
     
     # Convert to pandas for indicator calculations
     print("Computing technical indicators...")
+    if n_jobs is None:
+        n_jobs = max(1, cpu_count() - 1)
+    print(f"  Using {n_jobs} parallel workers")
     pdf = df.select(required_cols).to_pandas()
     
     # Add technical indicators
-    pdf = add_technical_indicators_pandas(pdf)
+    pdf = add_technical_indicators_pandas(pdf, n_jobs=n_jobs)
     print(f"  Added {len(pdf.columns) - len(required_cols)} technical indicator columns")
     
     # Convert back to Polars
@@ -329,12 +414,25 @@ def main() -> None:
         default="data/cache/technical_features.parquet",
         help="Output path for technical features parquet",
     )
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Number of parallel workers (default: auto-detect, use 1 for sequential)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force rebuild even if output is up to date",
+    )
     
     args = parser.parse_args()
     
     build_technical_features_from_daily(
         daily_path=args.daily_path,
         output_path=args.output,
+        n_jobs=args.n_jobs,
+        force=args.force,
     )
 
 
