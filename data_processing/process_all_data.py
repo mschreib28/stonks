@@ -97,7 +97,8 @@ def get_latest_date_in_cache(cache_path: Path) -> str | None:
     
     try:
         df = pl.scan_parquet(cache_path)
-        if "date" in df.columns:
+        schema_names = df.collect_schema().names()
+        if "date" in schema_names:
             max_date = df.select(pl.col("date").max()).collect()
             if max_date.height > 0 and max_date[0, 0] is not None:
                 return str(max_date[0, 0])
@@ -373,6 +374,7 @@ def process_technical_features(force: bool = False) -> bool:
         "data_processing/build_technical_features.py",
         "--daily-path", str(DAILY_OUTPUT),
         "--output", str(TECHNICAL_FEATURES_OUTPUT),
+        "--n-jobs", "8",
     ]
     
     if not force:
