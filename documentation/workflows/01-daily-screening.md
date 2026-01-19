@@ -24,9 +24,16 @@ Before market open, refresh your data.
 
 ### Command Line
 
+**Option 1: Automated Incremental Update (Recommended)**
 ```bash
-# Update with yesterday's data
-uv run python data_processing/build_polygon_cache.py --incremental
+# Automatically processes only new data (checks dates and skips existing)
+uv run python data_processing/process_all_data.py
+```
+
+**Option 2: Manual Update**
+```bash
+# Update daily cache (processes all files in input directory)
+uv run python data_processing/build_polygon_cache.py --add-returns
 
 # Rebuild technical features
 uv run python data_processing/build_technical_features.py
@@ -49,7 +56,7 @@ print('Total tickers:', df['ticker'].n_unique())
 ### Terminal 1: Backend
 
 ```bash
-uv run python api_server.py
+uv run python backend/api_server.py
 ```
 
 Wait for: `Uvicorn running on http://0.0.0.0:8000`
@@ -60,11 +67,11 @@ Wait for: `Uvicorn running on http://0.0.0.0:8000`
 cd frontend && npm run dev
 ```
 
-Wait for: `Local: http://localhost:5173/`
+Wait for: `Local: http://localhost:3000/`
 
 ### Open Browser
 
-Navigate to http://localhost:5173
+Navigate to http://localhost:3000
 
 ## Step 3: Run Stock Screening
 

@@ -4,7 +4,7 @@ Get Stonks running and find your first tradeable stocks in 5 minutes.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.13+
 - Node.js 18+
 - Market data (Polygon.io CSV files or S3 access)
 
@@ -41,7 +41,7 @@ data/
     └── ...
 ```
 
-## Step 3: Process the Data
+## Step 3: Process the Data (note: this could take a while)
 
 Run the master pipeline script to build all caches:
 
@@ -64,7 +64,7 @@ Open two terminal windows:
 
 **Terminal 1: Backend API**
 ```bash
-uv run python api_server.py
+uv run python backend/api_server.py
 ```
 
 **Terminal 2: Frontend**
@@ -74,7 +74,7 @@ cd frontend && npm run dev
 
 ## Step 5: Find Tradeable Stocks
 
-1. Open http://localhost:5173 in your browser
+1. Open http://localhost:3000 in your browser
 2. Go to the **Scoring** tab
 3. Click **Load Swing Trading Default** preset
 4. Click **Score Stocks**
@@ -154,12 +154,12 @@ uv run python data_processing/backtest_vectorbt.py --strategy macd --ticker AAPL
 - Run `uv run python data_processing/process_all_data.py` to build caches
 
 ### "API server not responding"
-- Check that `api_server.py` is running on port 8000
+- Check that `backend/api_server.py` is running on port 8000
 - Look for error messages in the terminal
 
 ### "Frontend won't load"
 - Ensure npm dependencies are installed
-- Check that the dev server is running on port 5173
+- Check that the dev server is running on port 3000
 
 ### "Missing parquet files"
 - Run the pipeline: `uv run python data_processing/process_all_data.py`
