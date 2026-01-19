@@ -1,3 +1,5 @@
+> **Disclaimer**: This software and documentation are for informational and educational purposes only. Nothing contained herein should be construed as investment advice, a recommendation to buy, sell, or hold any security or financial instrument, or as an offer or solicitation of an offer to buy or sell any security. Trading securities involves substantial risk of loss and is not suitable for all investors. Past performance is not indicative of future results. You should consult with a qualified financial advisor or other professional before making any investment decisions. The authors and contributors of this project are not registered investment advisors, financial planners, or securities brokers. Use of this software is at your own risk.
+
 # Stonks Documentation
 
 Welcome to the Stonks project documentation. This guide will help you understand and effectively use the platform for **short-term trading of small to mid-cap stocks**.
@@ -37,7 +39,7 @@ These are the production-ready features you should master first.
 | Document | Description | Status |
 |----------|-------------|--------|
 | [Feature Engineering](tier1-features/01-feature-engineering.md) | Technical indicators that drive predictions | ✅ Complete |
-| [Linear Models & Cross-Validation](tier1-features/02-linear-models.md) | Interpretable baselines and proper testing | 🟡 Partial |
+| [Linear Models & Cross-Validation](tier1-features/02-linear-models.md) | Interpretable baselines and proper testing | ✅ Complete |
 | [LightGBM Predictions](tier1-features/03-lightgbm-models.md) | Machine learning for return prediction | ✅ Complete |
 | [VectorBT Backtesting](tier1-features/04-vectorbt-backtesting.md) | Test strategies on historical data | ✅ Complete |
 | [Alphalens Factor Evaluation](tier1-features/05-alphalens-factors.md) | Evaluate if your factors actually predict returns | ✅ Complete |

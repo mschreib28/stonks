@@ -1,3 +1,5 @@
+> **Disclaimer**: This software and documentation are for informational and educational purposes only. Nothing contained herein should be construed as investment advice, a recommendation to buy, sell, or hold any security or financial instrument, or as an offer or solicitation of an offer to buy or sell any security. Trading securities involves substantial risk of loss and is not suitable for all investors. Past performance is not indicative of future results. You should consult with a qualified financial advisor or other professional before making any investment decisions. The authors and contributors of this project are not registered investment advisors, financial planners, or securities brokers. Use of this software is at your own risk.
+
 # Stonks - Stock Data Processing and Exploration
 
 A Python-based stock data processing pipeline with a React web interface for exploring and analyzing market data from Polygon.io.
