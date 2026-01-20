@@ -286,11 +286,23 @@ def build_technical_features_lazy(input_glob: str) -> pl.LazyFrame:
     return pl.from_pandas(df).lazy()
 
 
-def get_latest_date_in_parquet(parquet_path: Path | str) -> str | None:
+def get_latest_date_in_parquet(parquet_path: Path | str | list[Path]) -> str | None:
     """
-    Get the latest date from a parquet file.
-    Returns date as string (YYYY-MM-DD) or None if file doesn't exist or has no date column.
+    Get the latest date from one or more parquet files.
+    Returns date as string (YYYY-MM-DD) or None if files don't exist or have no date column.
     """
+    if isinstance(parquet_path, list):
+        # Get latest date across all files
+        dates = []
+        for path in parquet_path:
+            date = get_latest_date_in_parquet(path)
+            if date:
+                dates.append(date)
+        if not dates:
+            return None
+        # Return the maximum date (latest)
+        return max(dates)
+    
     parquet_path = Path(parquet_path)
     if not parquet_path.exists():
         return None
@@ -318,23 +330,28 @@ def get_latest_date_in_parquet(parquet_path: Path | str) -> str | None:
         return None
 
 
-def build_technical_features_from_daily(daily_path: str, output_path: str, n_jobs: int | None = None, force: bool = False) -> None:
+def build_technical_features_from_daily(daily_paths: list[Path] | str, output_path: str, n_jobs: int | None = None, force: bool = False) -> None:
     """
-    Build technical features from daily cache file.
+    Build technical features from daily cache file(s).
     
     Args:
-        daily_path: Path to daily parquet file
+        daily_paths: Path(s) to daily parquet file(s) - can be a single path string or list of Paths
         output_path: Path to output parquet file
         n_jobs: Number of parallel workers (None = auto-detect, 1 = sequential)
         force: If True, rebuild even if output is up to date
     """
-    daily_path_obj = Path(daily_path)
+    # Normalize input to list of Paths
+    if isinstance(daily_paths, str):
+        daily_paths = [Path(daily_paths)]
+    else:
+        daily_paths = [Path(p) if isinstance(p, str) else p for p in daily_paths]
+    
     output_path_obj = Path(output_path)
     
     # Check if we can skip processing
     if not force and output_path_obj.exists():
         print(f"Checking if rebuild is needed...")
-        daily_latest = get_latest_date_in_parquet(daily_path_obj)
+        daily_latest = get_latest_date_in_parquet(daily_paths)
         output_latest = get_latest_date_in_parquet(output_path_obj)
         
         if daily_latest and output_latest:
@@ -351,10 +368,18 @@ def build_technical_features_from_daily(daily_path: str, output_path: str, n_job
             print(f"   Use --force to rebuild anyway")
             return
     
-    print(f"Loading daily data from: {daily_path}")
+    # Load and combine all daily data files
+    if len(daily_paths) == 1:
+        print(f"Loading daily data from: {daily_paths[0]}")
+        df = pl.read_parquet(daily_paths[0])
+    else:
+        print(f"Loading daily data from {len(daily_paths)} files:")
+        for path in daily_paths:
+            print(f"  - {path.name}")
+        # Use lazy loading and concatenate for efficiency
+        lazy_frames = [pl.scan_parquet(str(p)) for p in daily_paths]
+        df = pl.concat(lazy_frames).collect()
     
-    # Load daily data
-    df = pl.read_parquet(daily_path)
     print(f"  Loaded {df.height:,} rows, {len(df.columns)} columns")
     
     # Check for required columns
@@ -400,14 +425,57 @@ def build_technical_features_from_daily(daily_path: str, output_path: str, n_job
         print(f"  - {col}")
 
 
+def find_daily_datasets(daily_path: str | None = None) -> list[Path]:
+    """
+    Find all daily dataset files, handling dynamic naming and combining across years.
+    
+    Args:
+        daily_path: Explicit path provided, or None to auto-detect all daily files
+        
+    Returns:
+        List of paths to daily parquet files (sorted by name for consistency)
+    """
+    if daily_path:
+        path = Path(daily_path)
+        if path.exists():
+            return [path]
+        raise FileNotFoundError(f"Daily dataset not found: {daily_path}")
+    
+    # Auto-detect: find all daily_*.parquet files and combine them
+    cache_dir = Path("data/cache")
+    
+    if not cache_dir.exists():
+        raise FileNotFoundError(
+            f"Cache directory not found: {cache_dir}\n"
+            f"Please run daily processing first or specify --daily-path"
+        )
+    
+    # Find all daily parquet files (excluding filtered/scored variants)
+    daily_files = [
+        f for f in cache_dir.glob("daily_*.parquet")
+        if not any(exclude in f.name for exclude in ["filtered", "scored", "technical"])
+    ]
+    
+    if not daily_files:
+        raise FileNotFoundError(
+            f"No daily dataset files found in {cache_dir}\n"
+            f"Please run daily processing first or specify --daily-path"
+        )
+    
+    # Sort by name for consistent ordering (e.g., daily_2025.parquet, daily_2026.parquet)
+    daily_files.sort(key=lambda p: p.name)
+    
+    return daily_files
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build technical indicator features from daily OHLCV data"
     )
     parser.add_argument(
         "--daily-path",
-        default="data/cache/daily_all.parquet",
-        help="Path to daily parquet file",
+        default=None,
+        help="Path to daily parquet file (default: auto-detect from data/cache/)",
     )
     parser.add_argument(
         "--output",
@@ -428,8 +496,25 @@ def main() -> None:
     
     args = parser.parse_args()
     
+    # Auto-detect daily files if not provided, otherwise use the specified path
+    if args.daily_path:
+        # User specified a path - use only that file
+        daily_paths = [Path(args.daily_path)]
+        if not daily_paths[0].exists():
+            raise FileNotFoundError(f"Daily dataset not found: {args.daily_path}")
+    else:
+        # Auto-detect all daily files across years
+        daily_paths = find_daily_datasets()
+    
+    if len(daily_paths) == 1:
+        print(f"Using daily dataset: {daily_paths[0].name}")
+    else:
+        print(f"Using {len(daily_paths)} daily datasets (spanning multiple years):")
+        for path in daily_paths:
+            print(f"  - {path.name}")
+    
     build_technical_features_from_daily(
-        daily_path=args.daily_path,
+        daily_paths=daily_paths,
         output_path=args.output,
         n_jobs=args.n_jobs,
         force=args.force,
