@@ -2,6 +2,19 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createChart, IChartApi, CandlestickData, HistogramData, Time, CandlestickSeries, HistogramSeries, LineSeries, LineData } from 'lightweight-charts';
 import { getTickerData } from '../api';
 
+// Debug logging config - set to "DEBUG" to enable, "OFF" to disable
+const DEBUG_LOG_LEVEL: string = "OFF";
+const DEBUG_ENDPOINT = "http://127.0.0.1:7245/ingest/4af8e20e-cd3b-461f-81d3-6c48f9f09368";
+
+const debugLog = (msg: string, data: Record<string, unknown>) => {
+  if (DEBUG_LOG_LEVEL !== "DEBUG") return;
+  fetch(DEBUG_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ msg, data, ts: Date.now() })
+  }).catch(() => {});
+};
+
 interface ChartPanelProps {
   dataset: string;
   ticker: string;
@@ -223,10 +236,17 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
   const loadTickerData = useCallback(async () => {
     setLoading(true);
     try {
+      debugLog('FE:loadTickerData:start', { dataset, ticker, limit: 5000 });
       // Load more data to ensure we have enough for longer periods
       // Request enough data to cover 12 months (approximately 252 trading days)
       // Use a larger limit to ensure we get historical data
       const response = await getTickerData(dataset, ticker, 5000);
+      
+      const dates = response.data?.map((r: any) => r.date).filter(Boolean).sort();
+      debugLog('FE:loadTickerData:response', {
+        dataset, ticker, total: response.total, returned: response.returned,
+        dataLen: response.data?.length, minDate: dates?.[0], maxDate: dates?.[dates?.length - 1]
+      });
       
       // If filtered dataset has limited data, try daily dataset for more history
       if (dataset === 'filtered' && response.total < 200 && response.returned < 200) {
