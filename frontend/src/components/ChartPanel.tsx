@@ -1045,7 +1045,7 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
       </div>
 
       {/* Additional Info Panel */}
-      {latest && latest.ret_d !== null && (
+      {latest && latest.ret_d !== null && latest.ret_d !== undefined && typeof latest.ret_d === 'number' && (
         <div className="px-4 pb-4 border-t border-gray-800 dark:border-gray-800 pt-4">
           <div className="grid grid-cols-3 gap-4 text-sm">
             <div>
@@ -1060,7 +1060,7 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
                 <div className="text-white font-semibold">{latest.volume.toLocaleString()}</div>
               </div>
             )}
-            {latest.high && latest.low && (
+            {latest.high && latest.low && typeof latest.high === 'number' && typeof latest.low === 'number' && (
               <div>
                 <div className="text-gray-400 mb-1">Range</div>
                 <div className="text-white font-semibold">
