@@ -1,0 +1,39 @@
+# Polars Best Practices
+
+## LazyFrame Schema Access
+
+When working with Polars `LazyFrame` objects, always use `collect_schema()` instead of accessing the `.schema` property directly to avoid performance warnings.
+
+### Rule
+
+- ✅ **Use**: `schema = lf.collect_schema()`
+- ❌ **Avoid**: `schema = lf.schema`
+
+### Why
+
+Accessing `.schema` on a `LazyFrame` triggers schema resolution, which can be expensive. Polars recommends using `collect_schema()` explicitly to make this operation intentional and clear.
+
+### Examples
+
+```python
+# ✅ Correct
+lf = pl.scan_parquet("data.parquet")
+schema = lf.collect_schema()
+if "column_name" in schema:
+    # process column
+
+# ❌ Incorrect - triggers PerformanceWarning
+lf = pl.scan_parquet("data.parquet")
+schema = lf.schema  # PerformanceWarning!
+```
+
+### When to Use
+
+- When you need to inspect the schema structure
+- When checking if columns exist (use `collect_schema()` first, then check membership)
+- When iterating over schema items
+- When you need column names or types before collecting the full DataFrame
+
+### Note
+
+For `DataFrame` objects (not `LazyFrame`), accessing `.schema` directly is fine and does not trigger warnings.
