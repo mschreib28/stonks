@@ -34,4 +34,5 @@ dependencies = [
     # Data Sources
     "pandas-datareader>=0.10.0",
     "yfinance>=0.2.0",
+    "duckdb>=1.4.3",
 ]
