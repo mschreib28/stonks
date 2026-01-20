@@ -17,9 +17,15 @@ The root of the project should be kept organized with as few loose files as poss
 - Create new subdirectories when a logical grouping emerges
 - Avoid cluttering the root with multiple similar files (e.g., multiple `build_*.py` scripts should be in `data_processing/` or similar)
 
+### Critical Rules
+
+- **API Server**: The API server file (`api_server.py`) MUST only exist in `backend/api_server.py`. NEVER create or duplicate it at the project root. If you need to modify the API server, edit `backend/api_server.py` only.
+
 ### Examples
 
+- ✅ `backend/api_server.py` - the ONLY location for the API server
 - ✅ `data_processing/build_event_labels.py` - organized in appropriate folder
 - ✅ `utils/ticker_filter.py` - organized in appropriate folder
+- ❌ `api_server.py` in root - MUST be in `backend/`
 - ❌ `build_event_labels.py` in root - should be in `data_processing/`
 - ❌ Multiple loose utility scripts in root - should be in `utils/` or similar
