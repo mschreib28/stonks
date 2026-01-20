@@ -23,6 +23,9 @@ interface ChartPanelProps {
 
 type TimePeriod = '1d' | '5d' | '30d' | '6mo' | '12mo';
 
+// Note: Intraday resolutions (15m, 1h, 2h) would require minute-level OHLCV data
+// which is not currently available. All charts show daily candles.
+
 // Technical indicator calculation functions
 const calculateSMA = (data: number[], period: number): (number | null)[] => {
   const result: (number | null)[] = [];
@@ -612,6 +615,10 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
           // Convert date to timestamp
           const timestamp = new Date(date).getTime() / 1000 as Time;
           
+          if (isNaN(timestamp as number)) {
+            return;
+          }
+          
           candlestickData.push({
             time: timestamp,
             open: open,
@@ -995,6 +1002,7 @@ export default function ChartPanel({ dataset, ticker, onClose }: ChartPanelProps
               {period}
             </button>
           ))}
+          <span className="ml-2 text-xs text-gray-500">Daily candles</span>
         </div>
         
         {/* Technical Indicator Toggles */}
