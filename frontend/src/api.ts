@@ -45,6 +45,61 @@ export const scoreTickers = async (request: ScoringRequest): Promise<ScoringResp
   return response.data;
 };
 
+// Fast scoring using DuckDB (sub-second response on 636M+ rows)
+export interface FastScoringRequest {
+  months_back?: number;
+  min_days?: number;
+  min_avg_volume?: number;
+  min_price?: number | null;
+  max_price?: number | null;
+  limit?: number;
+}
+
+export interface FastScoringResponse extends ScoringResponse {
+  query_time_seconds?: number;
+  source?: string;
+}
+
+export const scoreTickersFast = async (request: FastScoringRequest = {}): Promise<FastScoringResponse> => {
+  const response = await api.post('/score-tickers-fast', request);
+  return response.data;
+};
+
+// DuckDB status check
+export interface DuckDBStatus {
+  available: boolean;
+  database_path?: string;
+  database_size_mb?: number;
+  tables?: Record<string, { rows: number }>;
+  message?: string;
+  error?: string;
+}
+
+export const getDuckDBStatus = async (): Promise<DuckDBStatus> => {
+  const response = await api.get('/duckdb-status');
+  return response.data;
+};
+
+// Fast ticker search
+export const searchTickers = async (
+  query: string, 
+  minVolume?: number,
+  minPrice?: number,
+  maxPrice?: number,
+  limit?: number
+): Promise<{ results: Array<{ ticker: string; latest_close: number; avg_volume: number }>; total: number }> => {
+  const response = await api.get('/ticker-search', {
+    params: { 
+      q: query, 
+      min_volume: minVolume || 0,
+      min_price: minPrice,
+      max_price: maxPrice,
+      limit: limit || 20,
+    },
+  });
+  return response.data;
+};
+
 export interface DataFreshnessResponse {
   is_fresh: boolean;
   latest_data_date: string | null;

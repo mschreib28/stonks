@@ -7,12 +7,12 @@ import ScoringPanel from './components/ScoringPanel';
 import DataUpdateButton from './components/DataUpdateButton';
 import FactorEvaluationPanel from './components/FactorEvaluationPanel';
 import PerformancePanel from './components/PerformancePanel';
-import { listDatasets, getColumns, queryData, getStats, scoreTickers } from './api';
+import { listDatasets, getColumns, queryData, getStats, scoreTickers, scoreTickersFast, getDuckDBStatus } from './api';
 import type { Dataset, ColumnInfo, QueryRequest, QueryResponse, Filters, Stats, ScoringCriteria, RankedTicker } from './types';
 
 function App() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<string>('filtered');
+  const [selectedDataset, setSelectedDataset] = useState<string>('daily');
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
   const [filters, setFilters] = useState<Filters>({});
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -25,9 +25,9 @@ function App() {
   const [page, setPage] = useState<number>(0);
   const [pageSize, setPageSize] = useState<number>(100);
   const [scoringCriteria, setScoringCriteria] = useState<ScoringCriteria[]>([]);
-  const [monthsBack, setMonthsBack] = useState<number>(12);
-  const [minDays, setMinDays] = useState<number>(60);
-  const [minAvgVolume, setMinAvgVolume] = useState<number>(750000);
+  const [monthsBack, setMonthsBack] = useState<number>(3);  // Default to 3 months for faster scoring
+  const [minDays, setMinDays] = useState<number>(40);  // ~40 trading days in 3 months
+  const [minAvgVolume, setMinAvgVolume] = useState<number>(10000);
   const [minPrice, setMinPrice] = useState<number | undefined>(undefined);
   const [maxPrice, setMaxPrice] = useState<number | undefined>(undefined);
   const [rankedTickers, setRankedTickers] = useState<RankedTicker[]>([]);
@@ -137,9 +137,9 @@ function App() {
       if (ds.length > 0) {
         // If no dataset is selected, or the selected dataset doesn't exist, choose one
         if (!selectedDataset || !ds.find(d => d.name === selectedDataset)) {
-          // Prefer 'filtered' dataset if it exists, otherwise use the first one
-          const filteredDataset = ds.find(d => d.name === 'filtered');
-          setSelectedDataset(filteredDataset ? filteredDataset.name : ds[0].name);
+          // Prefer 'daily' dataset if it exists (includes all 2025 + 2026 data), otherwise use the first one
+          const dailyDataset = ds.find(d => d.name === 'daily');
+          setSelectedDataset(dailyDataset ? dailyDataset.name : ds[0].name);
         }
       }
     } catch (error) {
@@ -260,25 +260,58 @@ function App() {
 
     setScoring(true);
     try {
-      // Only apply filters that exist in the current dataset columns
-      const columnNames = new Set(columns.map((col) => col.name));
-      const applicableFilters: Filters = {};
-      Object.entries(filters).forEach(([key, value]) => {
-        if (columnNames.has(key)) {
-          applicableFilters[key] = value;
+      // Try fast DuckDB-based scoring first (sub-second response)
+      // Falls back to slow Python-based scoring if DuckDB unavailable
+      let response;
+      let usedFastScoring = false;
+      
+      try {
+        // Check if DuckDB is available
+        const duckdbStatus = await getDuckDBStatus();
+        
+        if (duckdbStatus.available) {
+          console.log('Using fast DuckDB scoring...');
+          const fastResponse = await scoreTickersFast({
+            months_back: monthsBack,
+            min_days: minDays,
+            min_avg_volume: minAvgVolume,
+            min_price: minPrice || undefined,
+            max_price: maxPrice || undefined,
+            limit: 100,  // Return top 100 tickers
+          });
+          response = fastResponse;
+          usedFastScoring = true;
+          console.log(`Fast scoring completed in ${fastResponse.query_time_seconds?.toFixed(3)}s, returned ${fastResponse.total} tickers`);
         }
-      });
+      } catch (fastError) {
+        console.warn('Fast scoring failed, falling back to standard scoring:', fastError);
+      }
+      
+      // Fall back to standard scoring if fast scoring failed or unavailable
+      if (!usedFastScoring) {
+        console.log('Using standard Python-based scoring (this may take several minutes)...');
+        
+        // Only apply filters that exist in the current dataset columns
+        const columnNames = new Set(columns.map((col) => col.name));
+        const applicableFilters: Filters = {};
+        Object.entries(filters).forEach(([key, value]) => {
+          if (columnNames.has(key)) {
+            applicableFilters[key] = value;
+          }
+        });
 
-      const response = await scoreTickers({
-        dataset: selectedDataset,
-        filters: applicableFilters,
-        criteria: scoringCriteria,
-        months_back: monthsBack,
-        min_days: minDays,
-        min_avg_volume: minAvgVolume,
-        min_price: minPrice,
-        max_price: maxPrice,
-      });
+        response = await scoreTickers({
+          dataset: selectedDataset,
+          filters: applicableFilters,
+          criteria: scoringCriteria,
+          months_back: monthsBack,
+          min_days: minDays,
+          min_avg_volume: minAvgVolume,
+          min_price: minPrice,
+          max_price: maxPrice,
+        });
+      }
+      
       setRankedTickers(response.ranked_tickers);
       setUseRankedResults(true);
       setPage(0);

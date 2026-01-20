@@ -100,12 +100,12 @@ const SWING_TRADING_DEFAULT_PRESET: ScoringPreset = {
       invert: false,
     },
   ],
-  monthsBack: 12,
-  minDays: 60,
-  minAvgVolume: 750000,
-  minPrice: undefined,
-  maxPrice: undefined,
-  dataset: 'filtered', // Use the filtered dataset by default
+  monthsBack: 3,  // Default to 3 months for faster scoring with lower RAM usage
+  minDays: 40,  // ~40 trading days in 3 months
+  minAvgVolume: 10000,
+  minPrice: 1,
+  maxPrice: 8,
+  dataset: 'daily', // Use the daily dataset by default (includes all 2025 + 2026 data)
   createdAt: '2025-01-01T00:00:00.000Z',
 };
 
@@ -274,9 +274,9 @@ export default function ScoringPanel({
     const settings: string[] = [];
     if (monthsBack !== 12) settings.push(`${monthsBack}mo period`);
     if (minDays !== 60) settings.push(`${minDays} min days`);
-    if (minAvgVolume !== 750000) settings.push(`${(minAvgVolume / 1000).toFixed(0)}k vol`);
+    if (minAvgVolume !== 10000) settings.push(`${(minAvgVolume / 1000).toFixed(0)}k vol`);
     if (minPrice !== undefined || maxPrice !== undefined) {
-      settings.push(`$${minPrice ?? '0'}-$${maxPrice ?? '∞'}`);
+      settings.push(`$${minPrice ?? '1'}-$${maxPrice ?? '8'}`);
     }
     
     if (settings.length > 0) {
@@ -642,7 +642,7 @@ export default function ScoringPanel({
                   min="0"
                   step="0.5"
                   placeholder="Min $"
-                  value={minPrice ?? ''}
+                  value={minPrice ?? '1'}
                   onChange={(e) => onMinPriceChange(e.target.value === '' ? undefined : Number(e.target.value))}
                   className="flex-1 px-2 py-1 text-sm border border-gray-600 dark:border-gray-600 rounded bg-gray-700 dark:bg-gray-700 text-white dark:text-white"
                 />
@@ -652,7 +652,7 @@ export default function ScoringPanel({
                   min="0"
                   step="0.5"
                   placeholder="Max $"
-                  value={maxPrice ?? ''}
+                  value={maxPrice ?? '8'}
                   onChange={(e) => onMaxPriceChange(e.target.value === '' ? undefined : Number(e.target.value))}
                   className="flex-1 px-2 py-1 text-sm border border-gray-600 dark:border-gray-600 rounded bg-gray-700 dark:bg-gray-700 text-white dark:text-white"
                 />
