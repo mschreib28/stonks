@@ -549,10 +549,34 @@ def get_stats(dataset: str):
         raise HTTPException(status_code=500, detail=f"Error computing stats: {str(e)}")
 
 
-@app.get("/api/dataset/{dataset}/ticker/{ticker}")
-def get_ticker_data(dataset: str, ticker: str, limit: int = 100):
-    """Get all data for a specific ticker."""
+# Debug logging config - set to "DEBUG" to enable, "OFF" to disable
+DEBUG_LOG_LEVEL = os.getenv("DEBUG_LOG_LEVEL", "OFF")
+DEBUG_LOG_PATH = os.path.join(os.path.dirname(__file__), "..", ".cursor", "debug.log")
+
+def debug_log(msg: str, data: dict):
+    """Write debug log if DEBUG_LOG_LEVEL is DEBUG"""
+    if DEBUG_LOG_LEVEL != "DEBUG":
+        return
+    import json as _json, time as _time
     try:
+        with open(DEBUG_LOG_PATH, "a") as f:
+            f.write(_json.dumps({"msg": msg, "data": data, "ts": int(_time.time()*1000)}) + "\n")
+    except Exception:
+        pass  # Silently fail if logging fails
+
+
+@app.get("/api/dataset/{dataset}/ticker/{ticker}")
+def get_ticker_data(dataset: str, ticker: str, limit: int = 100, aggregate_daily: bool = True):
+    """Get all data for a specific ticker.
+    
+    Args:
+        dataset: Dataset name
+        ticker: Stock ticker symbol
+        limit: Max rows to return (applied AFTER aggregation if aggregate_daily=True)
+        aggregate_daily: If True, aggregate minute data into daily OHLCV bars (default True for charts)
+    """
+    try:
+        debug_log("get_ticker_data:entry", {"dataset":dataset,"ticker":ticker,"limit":limit,"aggregate_daily":aggregate_daily})
         lf = load_dataset(dataset)
         
         schema = lf.collect_schema()
@@ -562,22 +586,68 @@ def get_ticker_data(dataset: str, ticker: str, limit: int = 100):
         # Filter to this ticker
         lf_filtered = lf.filter(pl.col("ticker") == ticker)
         
-        # Get total count before limiting
+        # Check if we need to aggregate minute data into daily bars
+        # This is needed because the "daily" dataset actually contains minute-level data
+        filtered_schema = lf_filtered.collect_schema()
+        date_col = "date" if "date" in filtered_schema else "week_start" if "week_start" in filtered_schema else None
+        
+        if aggregate_daily and date_col == "date":
+            # Check if data has multiple rows per day (minute data)
+            # by comparing row count to unique date count
+            sample_count = lf_filtered.select(pl.len().alias("count")).collect()["count"][0]
+            
+            if sample_count > 0:
+                unique_dates = lf_filtered.select(pl.col("date").n_unique().alias("unique")).collect()["unique"][0]
+                rows_per_day = sample_count / unique_dates if unique_dates > 0 else 1
+                
+                debug_log("get_ticker_data:check_aggregation", {
+                    "ticker": ticker, "total_rows": sample_count, "unique_dates": unique_dates,
+                    "rows_per_day": rows_per_day, "needs_aggregation": rows_per_day > 1.5
+                })
+                
+                # If more than 1.5 rows per day on average, it's minute data - aggregate it
+                if rows_per_day > 1.5:
+                    debug_log("get_ticker_data:aggregating", {"ticker": ticker, "aggregating_to": "daily"})
+                    
+                    # Aggregate minute data into daily OHLCV bars
+                    lf_filtered = (
+                        lf_filtered
+                        .group_by("date")
+                        .agg([
+                            pl.col("open").first().alias("open"),
+                            pl.col("high").max().alias("high"),
+                            pl.col("low").min().alias("low"),
+                            pl.col("close").last().alias("close"),
+                            pl.col("volume").sum().alias("volume"),
+                            # Keep other useful columns if they exist
+                            pl.col("ret_d").last().alias("ret_d") if "ret_d" in filtered_schema else pl.lit(None).alias("ret_d"),
+                            pl.col("abs_ret_d").last().alias("abs_ret_d") if "abs_ret_d" in filtered_schema else pl.lit(None).alias("abs_ret_d"),
+                        ])
+                        .with_columns(pl.lit(ticker).alias("ticker"))
+                    )
+        
+        # Get total count (after aggregation if applied)
         total_count = lf_filtered.select(pl.len().alias("count")).collect()["count"][0]
+        debug_log("get_ticker_data:total", {"ticker":ticker,"total_after_agg":total_count,"requested_limit":limit})
         
         # Sort and limit
-        filtered_schema = lf_filtered.collect_schema()
-        sort_col = "date" if "date" in filtered_schema else list(filtered_schema.keys())[1]
+        sort_col = "date" if "date" in lf_filtered.collect_schema() else list(lf_filtered.collect_schema().keys())[0]
         lf_filtered = lf_filtered.sort(sort_col, descending=True)
         lf_filtered = lf_filtered.head(limit)
         
         # Materialize only the limited results
         df = lf_filtered.collect()
         
+        # Log date range
+        result_date_col = "date" if "date" in df.columns else "week_start" if "week_start" in df.columns else None
+        min_date = str(df[result_date_col].min()) if result_date_col and len(df)>0 else None
+        max_date = str(df[result_date_col].max()) if result_date_col and len(df)>0 else None
+        debug_log("get_ticker_data:result", {"ticker":ticker,"total":total_count,"returned":len(df),"min_date":min_date,"max_date":max_date})
+        
         return {
             "ticker": ticker,
             "data": df.to_dicts(),
-            "total": total_count,  # Total available, not just returned
+            "total": total_count,  # Total available (daily bars, not minutes)
             "returned": len(df),  # Number actually returned
         }
     except Exception as e:
